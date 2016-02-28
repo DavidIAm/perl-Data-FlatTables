@@ -1,7 +1,7 @@
 
 
 
-namespace fbs.table;
+namespace test.tables;
 
 
 table Stat {
@@ -18,9 +18,9 @@ table defaultValues {
 
 table testMeta {
 	a:int(id:12);
-	a:int = 5 (id:12);
-	b : int=1337 (id:16, hash:"fnv1_32");
-	b : int=1337 ( id:16, hash:"fnv1_32" );
+	b:int = 5 (id:12);
+	c : int=1337 (id:16, hash:"fnv1_32");
+	d : int=1337 ( id:16, hash:"fnv1_32" );
 }
 
 
