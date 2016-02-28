@@ -1,0 +1,10 @@
+
+
+namespace fbs.test;
+
+include "nope.fbs";
+include "silly.fbs";
+
+root_type test_table;
+
+

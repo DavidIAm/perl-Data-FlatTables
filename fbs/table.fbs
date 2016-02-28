@@ -1,0 +1,14 @@
+
+
+
+namespace fbs.table;
+
+
+table Stat {
+	id:string;
+	val:long;
+	count:ushort;
+}
+
+
+root_type Stat;
