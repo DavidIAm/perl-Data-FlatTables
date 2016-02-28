@@ -307,13 +307,14 @@ sub new {
 		$code .= "sub $field->{name} { \@_ > 1 ? \$_[0]{$field->{name}} = \$_[1] : \$_[0]{$field->{name}} }\n";
 	}
 
+	my $vtable_item_count = 2 + scalar @{$data->{fields}};
 
 	# serialize_vtable header
 	$code .= '
 sub serialize_vtable {
 	my ($self) = @_;
 
-	my $data = "";
+	my @data;
 	my $offset = 4;
 ';
 
@@ -321,18 +322,21 @@ sub serialize_vtable {
 	for my $field (@{$data->{fields}}) {
 		$code .= "
 	if (defined \$self->$field->{name}) {
-		\$data .= pack 'S<', \$offset;
+		push \@data, \$offset;
 		\$offset += $field->{length};
 	} else {
-		\$data .= pack 'S<', 0;
+		push \@data, 0;
 	}
 ";
 	}
 
 	# serialize_vtable footer
 	$code .= "
-	\$data = pack ('S<S<', ". (4 + 2 * scalar @{$data->{fields}}) .", \$offset) . \$data;
-	return \$data
+
+	unshift \@data, \$offset;
+	unshift \@data, 2 * $vtable_item_count;
+
+	return pack '" . ('S<' x $vtable_item_count) . "', \@data
 }
 
 1 # true return from package
