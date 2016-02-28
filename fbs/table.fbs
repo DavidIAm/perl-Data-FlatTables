@@ -10,5 +10,18 @@ table Stat {
 	count:ushort;
 }
 
+table defaultValues {
+	a:int = 5;
+	b : int=1337;
+}
+
+
+table testMeta {
+	a:int(id:12);
+	a:int = 5 (id:12);
+	b : int=1337 (id:16, hash:"fnv1_32");
+	b : int=1337 ( id:16, hash:"fnv1_32" );
+}
+
 
 root_type Stat;
