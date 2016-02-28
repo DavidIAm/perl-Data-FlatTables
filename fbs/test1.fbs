@@ -1,0 +1,11 @@
+
+namespace Test1;
+
+
+table Table1 {
+	type : ubyte;
+	id : short;
+	name : string;
+	key : ulong;
+}
+

@@ -202,6 +202,7 @@ sub parse_type_decl {
 		};
 		$field->{default} = $default_value if defined $default_value;
 		$field->{meta} = $self->parse_metadata($field_meta) if defined $field_meta and $field_meta ne '';
+		$field->{length} = $self->get_type_length($field->{type});
 		push @fields, $field;
 	}
 	$type_decl{fields} = \@fields;
@@ -256,6 +257,22 @@ sub compile {
 	return \@compiled_types
 }
 
+# bool | byte | ubyte | short | ushort | int | uint | float | long | ulong | double | string | \[\s*(?&regex_type_recurse)\s*\] | $regex_ident ) /x;
+
+sub get_type_length {
+	my ($self, $type) = @_;
+	if ($type eq 'bool' or $type eq 'byte' or $type eq 'ubyte') {
+		return 1
+	} elsif ($type eq 'short' or $type eq 'ushort') {
+		return 2
+	} elsif ($type eq 'int' or $type eq 'uint' or $type eq 'float') {
+		return 4
+	} elsif ($type eq 'long' or $type eq 'ulong' or $type eq 'double') {
+		return 8
+	} else {
+		return 4
+	}
+}
 
 sub compile_type {
 	my ($self, $data, $typename) = @_;
@@ -283,13 +300,44 @@ sub new {
 	$code .= '
 	return $self;
 }
-
 ';
 
 	# field getter/setter functions
 	for my $field (@{$data->{fields}}) {
 		$code .= "sub $field->{name} { \@_ > 1 ? \$_[0]{$field->{name}} = \$_[1] : \$_[0]{$field->{name}} }\n";
 	}
+
+
+	# serialize_vtable header
+	$code .= '
+sub serialize_vtable {
+	my ($self) = @_;
+
+	my $data = "";
+	my $offset = 4;
+';
+
+	# field offset serializers
+	for my $field (@{$data->{fields}}) {
+		$code .= "
+	if (defined \$self->$field->{name}) {
+		\$data .= pack 'S<', \$offset;
+		\$offset += $field->{length};
+	} else {
+		\$data .= pack 'S<', 0;
+	}
+";
+	}
+
+	# serialize_vtable footer
+	$code .= "
+	\$data = pack ('S<S<', ". (4 + 2 * scalar @{$data->{fields}}) .", \$offset) . \$data;
+	return \$data
+}
+
+1 # true return from package
+
+";
 
 	return { type => $data->{struct}{type}, package_name => $typename, code => $code }
 }
