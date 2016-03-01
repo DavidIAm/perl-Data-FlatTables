@@ -309,6 +309,38 @@ sub new {
 
 	my $vtable_item_count = 2 + scalar @{$data->{fields}};
 
+	# serialize function
+	$code .= '
+sub serialize {
+	my ($self) = @_;
+
+	my @parts = $self->serialize_data;
+	my $root = $parts[0];
+	unshift @parts, { type => "header", data => "\0\0\0\0", reloc => [{ offset => 0, item => $root }] };
+
+	my $data = "";
+	my $offset = 0;
+
+	# concatentate the data
+	for my $part (@parts) {
+		$part->{serialized_offset} = $offset;
+		$data .= $part->{data};
+		$offset += length $part->{data};
+	}
+
+	# second pass for writing offsets to other parts
+	for my $part (@parts) {
+		if (defined $part->{reloc}) {
+			for my $reloc (@{$part->{reloc}}) {
+				substr $data, $part->{serialized_offset} + $reloc->{offset}, 4, pack "i", $reloc->{item}{serialized_offset};
+			}
+		}
+	}
+
+	return $data
+}
+';
+
 	# serialize_vtable header
 	$code .= '
 sub serialize_vtable {
@@ -349,8 +381,9 @@ sub serialize_data {
 	my $vtable = $self->serialize_vtable;
 	my $data = "\0\0\0\0";
 	my $offset = 0;
-	my @reloc;
-	push @reloc, { offset => $offset, item => $vtable };
+
+	my @reloc = ({ offset => $offset, item => $vtable });
+	my @objects = ($vtable);
 ';
 
 
@@ -383,6 +416,8 @@ sub serialize_data {
 			$code .= "\$data .= pack 'Q<', \$self->$field->{name};";
 		} elsif ($field->{type} eq 'double') {
 			$code .= "\$data .= pack 'd<', \$self->$field->{name};";
+		# } elsif ($field->{type} eq 'string') {
+		# 	$code .= "\$data .= pack 'd<', \$self->$field->{name};";
 		} else {
 			...
 		}
@@ -394,7 +429,7 @@ sub serialize_data {
 
 	# end of serialize_data
 	$code .= '
-	return $vtable, { type => "table", data => $data, reloc => \@reloc }
+	return { type => "table", data => $data, reloc => \@reloc }, @objects
 }
 	';
 
