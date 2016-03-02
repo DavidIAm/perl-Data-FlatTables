@@ -21,9 +21,48 @@ use Data::Dumper;
 
 
 
-sub strip_string (;$) {
-	(@_ ? $_[0] : $_) =~ s/\A"(.*)"\Z/$1/sr
+
+
+
+
+
+
+
+
+# compiles and loads packages from a given fbs file
+# returns the package name of the root object declared in the fbs file (undef if no root object was declared)
+sub load {
+	my ($self, $filepath) = @_;
+	my $parser = FlatBuffers->new;
+	my ($root_type, $compiled) = $parser->compile_file($filepath);
+
+	$parser->load_perl_packages($compiled);
+
+	return $root_type
 }
+
+
+
+# compiles a fbs file and writes perl packages in the current directory
+# returns the package name of the root object declared in the fbs file (undef if no root object was declared)
+sub create_packages {
+	my ($self, $filepath) = @_;
+	my $parser = FlatBuffers->new;
+	my ($root_type, $compiled) = $parser->compile_file($filepath);
+
+	$parser->create_perl_packages($compiled);
+	return $root_type
+}
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -86,6 +125,13 @@ sub compile_file {
 
 	my $syntax = $self->parse($text);
 	return $self->compile($syntax);
+}
+
+
+
+
+sub strip_string (;$) {
+	(@_ ? $_[0] : $_) =~ s/\A"(.*)"\Z/$1/sr
 }
 
 
@@ -237,12 +283,15 @@ sub compile {
 	my ($self, $code) = @_;
 
 	my $current_namespace;
+	my $root_type;
 
 	my @compiled_types;
 
 	for my $statement (@$code) {
 		if ($statement->{type} eq 'namespace_decl') {
+			# set a new current namespace
 			$current_namespace = $statement->{name} =~ s/\./::/gr;
+
 		} elsif ($statement->{type} eq 'type_decl') {
 			# get the top name with appropriate namespacing
 			my $typename = $statement->{struct}{name};
@@ -251,10 +300,19 @@ sub compile {
 
 			# compile and add it to the compiled types list
 			push @compiled_types, $self->compile_type($statement->{struct}, $typename);
+
+		} elsif ($statement->{type} eq 'root_decl') {
+			# set the root object type
+			my $typename = $statement->{name};
+			$typename = "${current_namespace}::$typename" if defined $current_namespace;
+			$typename = $self->toplevel_namespace . "::$typename" if defined $self->toplevel_namespace;
+
+			die "error: multiple root type declarations: '$root_type' and $typename" if defined $root_type;
+			$root_type = $typename
 		}
 	}
 
-	return \@compiled_types
+	return $root_type, \@compiled_types
 }
 
 # bool | byte | ubyte | short | ushort | int | uint | float | long | ulong | double | string | \[\s*(?&regex_type_recurse)\s*\] | $regex_ident ) /x;
@@ -530,13 +588,8 @@ sub serialize_data {
 }
 
 
-sub load {
-	my ($self, $filepath) = @_;
-	my $parser = FlatBuffers->new;
-	my $compiled = $parser->compile_file($filepath);
 
-	$parser->load_perl_packages($compiled);
-}
+
 
 # load packages from compiled packages
 sub load_perl_packages {
@@ -549,16 +602,6 @@ sub load_perl_packages {
 			die "compiled table died [$file->{package_name}]: $@";
 		}
 	}
-}
-
-
-
-sub create_packages {
-	my ($self, $filepath) = @_;
-	my $parser = FlatBuffers->new;
-	my $compiled = $parser->compile_file($filepath);
-
-	$parser->create_perl_packages($compiled);
 }
 
 
