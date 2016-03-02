@@ -315,7 +315,12 @@ sub serialize {
 	my ($self) = @_;
 
 	my @parts = $self->serialize_data;
-	my $root = $parts[0];
+	my $root = $parts[0]; # get the root data structure
+
+	# reorganize the parts to put vtables at the start
+	my @vtables = grep $_->{type} eq "vtable", @parts;
+	@parts = @vtables, grep $_->{type} ne "vtable", @parts;
+	# header pointer to root data structure
 	unshift @parts, { type => "header", data => "\0\0\0\0", reloc => [{ offset => 0, item => $root }] };
 
 	my $data = "";
@@ -332,11 +337,18 @@ sub serialize {
 	for my $part (@parts) {
 		if (defined $part->{reloc}) {
 			for my $reloc (@{$part->{reloc}}) {
-				substr $data, $part->{serialized_offset} + $reloc->{offset}, 4, pack "i", $reloc->{item}{serialized_offset};
+				my $value = $reloc->{item}{serialized_offset};
+				if (defined $reloc->{lambda}) { # allow the reloc to have a custom format
+					$value = $reloc->{lambda}($value);
+				} else {
+					$value = pack "i", $value;
+				}
+				substr $data, $part->{serialized_offset} + $reloc->{offset}, length($value), $value;
 			}
 		}
 	}
 
+	# done, the data is now ready to be deserialized
 	return $data
 }
 ';
@@ -362,13 +374,17 @@ sub serialize_vtable {
 ";
 	}
 
+	$code .= "
+	push \@data, 0; # pad to 4 byte boundary
+" if @{$data->{fields}} % 2; # add padding code if there is an odd field count
+
 	# serialize_vtable footer
 	$code .= "
 
 	unshift \@data, \$offset;
 	unshift \@data, 2 * $vtable_item_count;
 
-	return { type => 'vtable', data => pack '" . ('S<' x $vtable_item_count) . "', \@data }
+	return { type => 'vtable', data => pack 'S<' x \@data, \@data }
 }
 ";
 
@@ -382,7 +398,10 @@ sub serialize_data {
 	my $data = "\0\0\0\0";
 	my $offset = 0;
 
-	my @reloc = ({ offset => $offset, item => $vtable });
+	my $data_object = { type => "table" };
+
+	my @reloc = ({ offset => $offset, item => $vtable, lambda => sub { pack "i", $data_object->{serialized_offset} - $_[0] } });
+	# flatbuffers vtable offset is stored in negative form
 	my @objects = ($vtable);
 ';
 
@@ -429,7 +448,13 @@ sub serialize_data {
 
 	# end of serialize_data
 	$code .= '
-	return { type => "table", data => $data, reloc => \@reloc }, @objects
+	# pad to 4 byte boundary
+	$data .= pack "x" x (4 - (length ($data) % 4)) if length ($data) % 4;
+
+	$data_object->{data} = $data;
+	$data_object->{reloc} = \@reloc;
+	# return table data and other objects that we\'ve created
+	return $data_object, @objects
 }
 	';
 

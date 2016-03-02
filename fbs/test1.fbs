@@ -3,9 +3,14 @@ namespace Test1;
 
 
 table Table1 {
+	odd : bool;
 	type : ubyte;
 	id : short;
 	val : uint;
 	key : ulong;
 }
+
+
+root_type Table1;
+
 
