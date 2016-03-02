@@ -409,8 +409,11 @@ sub deserialize {
 			$code .= "\$self->$field->{name}(unpack 'Q<', substr \$data, \$object_offset + \$offset, 8);";
 		} elsif ($field->{type} eq 'double') {
 			$code .= "\$self->$field->{name}(unpack 'd<', substr \$data, \$object_offset + \$offset, 8);";
-		# } elsif ($field->{type} eq 'string') {
-		# 	$code .= "\$self->$field->{name}(unpack 'd<', substr \$data, \$object_offset + \$offset, );";
+		} elsif ($field->{type} eq 'string') {
+			$code .= 'my $string_offset = $object_offset + $offset + unpack "L<", substr $data, $object_offset + $offset, 4;
+		my $string_length = unpack "L<", substr $data, $string_offset, 4;';
+			$code .= "
+		\$self->$field->{name}(substr \$data, \$string_offset + 4, \$string_length);";
 		} else {
 			...
 		}
@@ -457,7 +460,7 @@ sub serialize {
 				if (defined $reloc->{lambda}) { # allow the reloc to have a custom format
 					$value = $reloc->{lambda}($value);
 				} else {
-					$value = pack "l", $value;
+					$value = pack "l<", $value;
 				}
 				substr $data, $part->{serialized_offset} + $reloc->{offset}, length($value), $value;
 			}
@@ -516,9 +519,12 @@ sub serialize_data {
 
 	my $data_object = { type => "table" };
 
-	my @reloc = ({ offset => $offset, item => $vtable, lambda => sub { pack "l", $data_object->{serialized_offset} - $_[0] } });
+	my @reloc = ({ offset => $offset, item => $vtable, lambda => sub { pack "l<", $data_object->{serialized_offset} - $_[0] } });
 	# flatbuffers vtable offset is stored in negative form
 	my @objects = ($vtable);
+
+	$offset += 4;
+
 ';
 
 
@@ -551,8 +557,13 @@ sub serialize_data {
 			$code .= "\$data .= pack 'Q<', \$self->$field->{name};";
 		} elsif ($field->{type} eq 'double') {
 			$code .= "\$data .= pack 'd<', \$self->$field->{name};";
-		# } elsif ($field->{type} eq 'string') {
-		# 	$code .= "\$data .= pack 'd<', \$self->$field->{name};";
+		} elsif ($field->{type} eq 'string') {
+			$code .= '$data .= "\0\0\0\0";';
+			$code .= "
+		my \$string_object = \$self->serialize_string(\$self->$field->{name});
+		push \@objects, \$string_object;
+		my \$closured_offset = \$offset; # necessary, otherwise a changed offset will be closured
+		push \@reloc, { offset => \$offset, item => \$string_object, lambda => sub { pack 'L<', \$_[0] - \$data_object->{serialized_offset} - \$closured_offset } };";
 		} else {
 			...
 		}
@@ -575,7 +586,19 @@ sub serialize_data {
 	';
 
 
+	$code .= '
+sub serialize_string {
+	my ($self, $string) = @_;
 
+	my $len = pack "L<", length $string;
+	$string .= "\0"; # null termination byte because why the fuck not (it\'s part of flatbuffers)
+
+	my $data = "$len$string";
+	$data .= pack "x" x (4 - (length ($data) % 4)) if length ($data) % 4; # pad to 4 byte boundary
+
+	return { type => "string", data => $data }
+}
+';
 
 	# package footer
 	$code .= "

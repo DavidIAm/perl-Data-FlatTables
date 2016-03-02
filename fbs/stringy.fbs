@@ -1,0 +1,19 @@
+
+namespace Test1;
+
+
+table TableWithStrings {
+	beginning : int;
+	type : ubyte;
+	val : string;
+	val2 : string;
+	padding : int;
+	padding2 : int;
+	val15 : string;
+	ending : int;
+}
+
+
+root_type TableWithStrings;
+
+
