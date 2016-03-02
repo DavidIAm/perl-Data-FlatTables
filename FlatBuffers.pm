@@ -304,10 +304,70 @@ sub new {
 
 	# field getter/setter functions
 	for my $field (@{$data->{fields}}) {
-		$code .= "sub $field->{name} { \@_ > 1 ? \$_[0]{table__$field->{name}} = \$_[1] : \$_[0]{table__$field->{name}} }\n";
+		$code .= "sub $field->{name} { \@_ > 1 ? \$_[0]{$field->{name}} = \$_[1] : \$_[0]{$field->{name}} }\n";
 	}
 
 	my $vtable_item_count = 2 + scalar @{$data->{fields}};
+
+
+	# deserialize function
+	$code .= '
+sub deserialize {
+	my ($self, $data, $offset) = @_;
+	$offset //= 0;
+	$self = $self->new unless ref $self;
+
+	my $object_offset = $offset + unpack "L<", substr $data, $offset, 4;
+	my $vtable_offset = $object_offset - unpack "l<", substr $data, $object_offset, 4;
+
+';
+
+	# field data deserializers
+	my $vtable_iterator = 4;
+	for my $field (@{$data->{fields}}) {
+		$code .= "
+	\$offset = unpack 'S<', substr \$data, \$vtable_offset + $vtable_iterator, 2;
+	if (\$offset != 0) {
+		";
+		if ($field->{type} eq 'bool') {
+			$code .= "\$self->$field->{name}(unpack 'C', substr \$data, \$object_offset + \$offset, 1);";
+		} elsif ($field->{type} eq 'byte') {
+			$code .= "\$self->$field->{name}(unpack 'c', substr \$data, \$object_offset + \$offset, 1);";
+		} elsif ($field->{type} eq 'ubyte') {
+			$code .= "\$self->$field->{name}(unpack 'C', substr \$data, \$object_offset + \$offset, 1);";
+		} elsif ($field->{type} eq 'short') {
+			$code .= "\$self->$field->{name}(unpack 's<', substr \$data, \$object_offset + \$offset, 2);";
+		} elsif ($field->{type} eq 'ushort') {
+			$code .= "\$self->$field->{name}(unpack 'S<', substr \$data, \$object_offset + \$offset, 2);";
+		} elsif ($field->{type} eq 'int') {
+			$code .= "\$self->$field->{name}(unpack 'l<', substr \$data, \$object_offset + \$offset, 4);";
+		} elsif ($field->{type} eq 'uint') {
+			$code .= "\$self->$field->{name}(unpack 'L<', substr \$data, \$object_offset + \$offset, 4);";
+		} elsif ($field->{type} eq 'float') {
+			$code .= "\$self->$field->{name}(unpack 'f<', substr \$data, \$object_offset + \$offset, 4);";
+		} elsif ($field->{type} eq 'long') {
+			$code .= "\$self->$field->{name}(unpack 'q<', substr \$data, \$object_offset + \$offset, 8);";
+		} elsif ($field->{type} eq 'ulong') {
+			$code .= "\$self->$field->{name}(unpack 'Q<', substr \$data, \$object_offset + \$offset, 8);";
+		} elsif ($field->{type} eq 'double') {
+			$code .= "\$self->$field->{name}(unpack 'd<', substr \$data, \$object_offset + \$offset, 8);";
+		# } elsif ($field->{type} eq 'string') {
+		# 	$code .= "\$self->$field->{name}(unpack 'd<', substr \$data, \$object_offset + \$offset, );";
+		} else {
+			...
+		}
+		$code .= "
+	}
+";
+		$vtable_iterator += 2;
+	}
+
+	# end of deserialize function
+	$code .= '
+	return $self
+}
+';
+
 
 	# serialize function
 	$code .= '
@@ -336,12 +396,13 @@ sub serialize {
 	# second pass for writing offsets to other parts
 	for my $part (@parts) {
 		if (defined $part->{reloc}) {
+			# perform address relocation
 			for my $reloc (@{$part->{reloc}}) {
 				my $value = $reloc->{item}{serialized_offset};
 				if (defined $reloc->{lambda}) { # allow the reloc to have a custom format
 					$value = $reloc->{lambda}($value);
 				} else {
-					$value = pack "i", $value;
+					$value = pack "l", $value;
 				}
 				substr $data, $part->{serialized_offset} + $reloc->{offset}, length($value), $value;
 			}
@@ -400,7 +461,7 @@ sub serialize_data {
 
 	my $data_object = { type => "table" };
 
-	my @reloc = ({ offset => $offset, item => $vtable, lambda => sub { pack "i", $data_object->{serialized_offset} - $_[0] } });
+	my @reloc = ({ offset => $offset, item => $vtable, lambda => sub { pack "l", $data_object->{serialized_offset} - $_[0] } });
 	# flatbuffers vtable offset is stored in negative form
 	my @objects = ($vtable);
 ';
