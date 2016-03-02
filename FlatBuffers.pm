@@ -377,9 +377,6 @@ sub serialize {
 	my @parts = $self->serialize_data;
 	my $root = $parts[0]; # get the root data structure
 
-	# reorganize the parts to put vtables at the start
-	my @vtables = grep $_->{type} eq "vtable", @parts;
-	@parts = (@vtables, grep $_->{type} ne "vtable", @parts);
 	# header pointer to root data structure
 	unshift @parts, { type => "header", data => "\0\0\0\0", reloc => [{ offset => 0, item => $root }] };
 
