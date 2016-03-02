@@ -319,7 +319,7 @@ sub serialize {
 
 	# reorganize the parts to put vtables at the start
 	my @vtables = grep $_->{type} eq "vtable", @parts;
-	@parts = @vtables, grep $_->{type} ne "vtable", @parts;
+	@parts = (@vtables, grep $_->{type} ne "vtable", @parts);
 	# header pointer to root data structure
 	unshift @parts, { type => "header", data => "\0\0\0\0", reloc => [{ offset => 0, item => $root }] };
 
@@ -472,6 +472,40 @@ sub serialize_data {
 }
 
 
+sub load {
+	my ($self, $filepath) = @_;
+	my $parser = FlatBuffers->new;
+	my $compiled = $parser->compile_file($filepath);
+
+	$parser->load_perl_packages($compiled);
+}
+
+# load packages from compiled packages
+sub load_perl_packages {
+	my ($self, $compiled) = @_;
+
+	for my $file (@$compiled) {
+		# say "compiled file: $file->{code}";
+		eval $file->{code};
+		if ($@) {
+			die "compiled table died [$file->{package_name}]: $@";
+		}
+	}
+}
+
+
+
+sub create_packages {
+	my ($self, $filepath) = @_;
+	my $parser = FlatBuffers->new;
+	my $compiled = $parser->compile_file($filepath);
+
+	$parser->create_perl_packages($compiled);
+}
+
+
+
+# creates files from compiled packages
 sub create_perl_packages {
 	my ($self, $compiled) = @_;
 
@@ -485,11 +519,9 @@ sub create_perl_packages {
 }
 
 sub main {
-	my ($filepath) = @_;
-	my $parser = FlatBuffers->new;
-	my $compiled = $parser->compile_file($filepath);
-
-	$parser->create_perl_packages($compiled);
+	for my $filepath (@_) {
+		FlatBuffers->create_packages($filepath);
+	}
 }
 
 caller or main(@ARGV)
