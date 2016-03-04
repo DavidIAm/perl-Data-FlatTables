@@ -1,0 +1,15 @@
+
+namespace Test1;
+
+table asdf {
+	id : int;
+	subtable : qwerty;
+	pad : int;
+}
+
+table qwerty {
+	a : uint;
+	b : uint;
+}
+
+root_type asdf;

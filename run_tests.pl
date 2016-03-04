@@ -21,6 +21,19 @@ my %loaded_files; # prevent double loading files
 
 
 
+sub compare_hashes {
+	my ($hash1, $hash2) = @_;
+	for my $field (keys %$hash1, keys %$hash2) {
+		if (not defined $hash2->{$field}) {
+			die "incorrect decoding for field '$field': undef <=> $hash1->{$field}" if defined $hash1->{$field};
+		} elsif (ref $hash1->{$field} eq 'HASH') {
+			compare_hashes($hash1->{$field}, $hash2->{$field});
+		} else {
+			die "incorrect decoding for field '$field': $hash2->{$field} <=> $hash1->{$field}" if $hash2->{$field} ne $hash1->{$field};
+		}
+	}
+}
+
 sub test_perl_to_perl {
 	my ($class, $file, $data) = @_;
 
@@ -31,13 +44,8 @@ sub test_perl_to_perl {
 	my $serialized_data = $class->new(%$data)->serialize;
 	my $res = $class->deserialize($serialized_data);
 
-	for my $field (keys %$res, keys %$data) {
-		if (not defined $data->{$field}) {
-			die "incorrect decoding for field '$field': undef <=> $res->{$field}" if defined $res->{$field};
-		} else {
-			die "incorrect decoding for field '$field': $data->{$field} <=> $res->{$field}" if $data->{$field} ne $res->{$field};
-		}
-	}
+	compare_hashes($data, $res);
+
 	say "all correct perl to perl for class $class with file $file";
 }
 
@@ -55,14 +63,8 @@ sub test_perl_to_flatbuffers {
 	# read the json
 	my $res = decode_json read_text('out.json');
 
-	# compare start to result
-	for my $field (keys %$res, keys %$data) {
-		if (not defined $data->{$field}) {
-			die "incorrect decoding for field '$field': undef <=> $res->{$field}" if defined $res->{$field};
-		} else {
-			die "incorrect decoding for field '$field': $data->{$field} <=> $res->{$field}" if $data->{$field} ne $res->{$field};
-		}
-	}
+	compare_hashes($data, $res);
+
 	say "all correct perl to flatbuffers for class $class with file $file";
 
 	# cleanup
@@ -86,14 +88,8 @@ sub test_flatbuffers_to_perl {
 	my $serialized_data = read_binary('out.bin');
 	my $res = $class->deserialize($serialized_data);
 
-	# compare start to results
-	for my $field (keys %$res, keys %$data) {
-		if (not defined $data->{$field}) {
-			die "[$file] incorrect decoding for field '$field': undef <=> $res->{$field}" if defined $res->{$field};
-		} else {
-			die "[$file] incorrect decoding for field '$field': $data->{$field} <=> $res->{$field}" if $data->{$field} ne $res->{$field};
-		}
-	}
+	compare_hashes($data, $res);
+
 	say "all correct flatbuffers to perl for class $class with file $file";
 
 	# cleanup
@@ -145,5 +141,34 @@ test_flatbuffers_to_perl('Test1::TableWithStrings' => 'fbs/stringy.fbs', { type 
 test_flatbuffers_to_perl('Test1::TableWithStrings' => 'fbs/stringy.fbs', { val => 'asdf', val2 => 'qwerty', val15 => '' });
 # test skipped because flatbuffers arbitrarily skips serializing fields with a value of 0, thus making this test always fail
 # test_flatbuffers_to_perl('Test1::TableWithStrings' => 'fbs/stringy.fbs', { val => "12456789", val2 => '', val15 => 'asdfasdfasd', padding => 0, padding2 => 0x7fffffff });
+
+test_perl_to_perl('Test1::asdf' => 'fbs/subtable.fbs', { subtable => { a => 15, b => 30 } });
+test_perl_to_perl('Test1::asdf' => 'fbs/subtable.fbs', { id => 1, subtable => { a => 15 }, pad => 100 });
+test_perl_to_perl('Test1::asdf' => 'fbs/subtable.fbs', { id => 1, pad => 100 });
+
+test_perl_to_flatbuffers('Test1::asdf' => 'fbs/subtable.fbs', { subtable => { a => 15, b => 30 } });
+test_perl_to_flatbuffers('Test1::asdf' => 'fbs/subtable.fbs', { id => 1, subtable => { a => 15 }, pad => 100 });
+test_perl_to_flatbuffers('Test1::asdf' => 'fbs/subtable.fbs', { id => 1, pad => 100 });
+
+test_flatbuffers_to_perl('Test1::asdf' => 'fbs/subtable.fbs', { subtable => { a => 15, b => 30 } });
+test_flatbuffers_to_perl('Test1::asdf' => 'fbs/subtable.fbs', { id => 1, subtable => { a => 15 }, pad => 100 });
+test_flatbuffers_to_perl('Test1::asdf' => 'fbs/subtable.fbs', { id => 1, pad => 100 });
+
+
+test_perl_to_perl('Test1::RecursiveTable' => 'fbs/recursive_subtable.fbs', { val => 5 });
+test_perl_to_perl('Test1::RecursiveTable' => 'fbs/recursive_subtable.fbs', { val => 500, sub => { val => 15 } });
+test_perl_to_perl('Test1::RecursiveTable' => 'fbs/recursive_subtable.fbs', { val => -1, sub => { sub => { val => -100 } } });
+test_perl_to_perl('Test1::RecursiveTable' => 'fbs/recursive_subtable.fbs', { sub => { sub => { sub => { val => 1337 } } } });
+
+test_perl_to_flatbuffers('Test1::RecursiveTable' => 'fbs/recursive_subtable.fbs', { val => 5 });
+test_perl_to_flatbuffers('Test1::RecursiveTable' => 'fbs/recursive_subtable.fbs', { val => 500, sub => { val => 15 } });
+test_perl_to_flatbuffers('Test1::RecursiveTable' => 'fbs/recursive_subtable.fbs', { val => -1, sub => { sub => { val => -100 } } });
+test_perl_to_flatbuffers('Test1::RecursiveTable' => 'fbs/recursive_subtable.fbs', { sub => { sub => { sub => { val => 1337 } } } });
+
+test_flatbuffers_to_perl('Test1::RecursiveTable' => 'fbs/recursive_subtable.fbs', { val => 5 });
+test_flatbuffers_to_perl('Test1::RecursiveTable' => 'fbs/recursive_subtable.fbs', { val => 500, sub => { val => 15 } });
+test_flatbuffers_to_perl('Test1::RecursiveTable' => 'fbs/recursive_subtable.fbs', { val => -1, sub => { sub => { val => -100 } } });
+test_flatbuffers_to_perl('Test1::RecursiveTable' => 'fbs/recursive_subtable.fbs', { sub => { sub => { sub => { val => 1337 } } } });
+
 
 

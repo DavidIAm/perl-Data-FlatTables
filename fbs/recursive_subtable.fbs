@@ -1,0 +1,11 @@
+
+namespace Test1;
+
+
+table RecursiveTable {
+	val : int;
+	sub : RecursiveTable;
+}
+
+
+root_type RecursiveTable;
