@@ -12,6 +12,7 @@ use FlatBuffers;
 
 # bool values cannot be tested properly because the JSON package decodes boolean as strings instead of 0/1
 # 0 integer values are mostly incompatible with flatbuffers because flatbuffers for some reason just skips the fields 0 value when serializing
+# flatbuffers forbids anything but scalars and struct fields
 
 
 # settings
@@ -42,11 +43,16 @@ sub test_perl_to_perl {
 
 	# serialize the data
 	my $serialized_data = $class->new(%$data)->serialize;
+	write_binary('out.bin', $serialized_data);
+
 	my $res = $class->deserialize($serialized_data);
 
 	compare_hashes($data, $res);
 
 	say "all correct perl to perl for class $class with file $file";
+	
+	# cleanup
+	unlink 'out.bin';
 }
 
 
@@ -155,6 +161,7 @@ test_flatbuffers_to_perl('Test1::asdf' => 'fbs/subtable.fbs', { id => 1, subtabl
 test_flatbuffers_to_perl('Test1::asdf' => 'fbs/subtable.fbs', { id => 1, pad => 100 });
 
 
+
 test_perl_to_perl('Test1::RecursiveTable' => 'fbs/recursive_subtable.fbs', { val => 5 });
 test_perl_to_perl('Test1::RecursiveTable' => 'fbs/recursive_subtable.fbs', { val => 500, sub => { val => 15 } });
 test_perl_to_perl('Test1::RecursiveTable' => 'fbs/recursive_subtable.fbs', { val => -1, sub => { sub => { val => -100 } } });
@@ -171,4 +178,68 @@ test_flatbuffers_to_perl('Test1::RecursiveTable' => 'fbs/recursive_subtable.fbs'
 test_flatbuffers_to_perl('Test1::RecursiveTable' => 'fbs/recursive_subtable.fbs', { sub => { sub => { sub => { val => 1337 } } } });
 
 
+
+test_perl_to_perl('Test1::TableWithStruct' => 'fbs/struct.fbs', { obj => { key => 15, val => 400 } });
+test_perl_to_perl('Test1::TableWithStruct' => 'fbs/struct.fbs', { obj => { key => 15, val => 400 }, obj2 => { key => -5, val => -500 } });
+test_perl_to_perl('Test1::TableWithStruct' => 'fbs/struct.fbs', { id => 8, obj2 => { key => -5, val => -500 }, pad => -8 });
+
+test_perl_to_flatbuffers('Test1::TableWithStruct' => 'fbs/struct.fbs', { obj => { key => 15, val => 400 } });
+test_perl_to_flatbuffers('Test1::TableWithStruct' => 'fbs/struct.fbs', { obj => { key => 15, val => 400 }, obj2 => { key => -5, val => -500 } });
+test_perl_to_flatbuffers('Test1::TableWithStruct' => 'fbs/struct.fbs', { id => 8, obj2 => { key => -5, val => -500 }, pad => -8 });
+
+test_flatbuffers_to_perl('Test1::TableWithStruct' => 'fbs/struct.fbs', { obj => { key => 15, val => 400 } });
+test_flatbuffers_to_perl('Test1::TableWithStruct' => 'fbs/struct.fbs', { obj => { key => 15, val => 400 }, obj2 => { key => -5, val => -500 } });
+test_flatbuffers_to_perl('Test1::TableWithStruct' => 'fbs/struct.fbs', { id => 8, obj2 => { key => -5, val => -500 }, pad => -8 });
+
+
+
+test_perl_to_perl('Test1::TableWithComplexStruct' => 'fbs/complex_struct.fbs', {
+	data => { id => 15, subdata1 => { test => 1, val => 2 }, subdata2 => { test => -4, val => -5 } },
+});
+test_perl_to_perl('Test1::TableWithComplexStruct' => 'fbs/complex_struct.fbs', {
+	name => 'test',
+	data => { id => 215, subdata1 => { test => 21, val => 22 }, subdata2 => { test => -24, val => -25 } },
+	testdata => { test => 1337, val => 7331 },
+	padding => 111111,
+});
+test_perl_to_perl('Test1::TableWithComplexStruct' => 'fbs/complex_struct.fbs', {
+	name => 'no data',
+	testdata => { test => -1, val => -2 },
+	padding => -111111,
+});
+
+test_perl_to_flatbuffers('Test1::TableWithComplexStruct' => 'fbs/complex_struct.fbs', {
+	data => { id => 15, subdata1 => { test => 1, val => 2 }, subdata2 => { test => -4, val => -5 } },
+});
+test_perl_to_flatbuffers('Test1::TableWithComplexStruct' => 'fbs/complex_struct.fbs', {
+	name => 'test',
+	data => { id => 215, subdata1 => { test => 21, val => 22 }, subdata2 => { test => -24, val => -25 } },
+	testdata => { test => 1337, val => 7331 },
+	padding => 111111,
+});
+test_perl_to_flatbuffers('Test1::TableWithComplexStruct' => 'fbs/complex_struct.fbs', {
+	name => 'no data',
+	testdata => { test => -1, val => -2 },
+	padding => -111111,
+});
+
+test_flatbuffers_to_perl('Test1::TableWithComplexStruct' => 'fbs/complex_struct.fbs', {
+	data => { id => 15, subdata1 => { test => 1, val => 2 }, subdata2 => { test => -4, val => -5 } },
+});
+test_flatbuffers_to_perl('Test1::TableWithComplexStruct' => 'fbs/complex_struct.fbs', {
+	name => 'test',
+	data => { id => 215, subdata1 => { test => 21, val => 22 }, subdata2 => { test => -24, val => -25 } },
+	testdata => { test => 1337, val => 7331 },
+	padding => 111111,
+});
+test_flatbuffers_to_perl('Test1::TableWithComplexStruct' => 'fbs/complex_struct.fbs', {
+	name => 'no data',
+	testdata => { test => -1, val => -2 },
+	padding => -111111,
+});
+
+
+# test_perl_to_perl('Test1::TableWithPointingStruct' => 'fbs/pointing_struct.fbs', {
+# 	data => { name => 'name', value => 'value', child1 => {}, child2 => {} },
+# });
 

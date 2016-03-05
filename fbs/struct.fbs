@@ -1,0 +1,17 @@
+
+namespace Test1;
+
+
+struct StructObject {
+	key : int;
+	val : int;
+}
+
+table TableWithStruct {
+	id : int;
+	obj : StructObject;
+	obj2 : StructObject;
+	pad : int;
+}
+
+root_type TableWithStruct;

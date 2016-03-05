@@ -1,0 +1,28 @@
+
+
+namespace Test1;
+
+
+
+struct SimpleStruct {
+	test : int;
+	val : int;	
+}
+
+
+
+struct ComplexStruct {
+	id : int;
+	subdata1 : SimpleStruct;
+	subdata2 : SimpleStruct;
+}
+
+table TableWithComplexStruct {
+	name : string;
+	data : ComplexStruct;
+	testdata : SimpleStruct;
+	padding : int;
+}
+
+
+root_type TableWithComplexStruct;
