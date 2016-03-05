@@ -1,0 +1,22 @@
+
+namespace Test1;
+
+
+struct PointingStruct {
+	name : string;
+	value : string;
+	child1 : TableWithPointingStruct;
+	child2 : TableWithPointingStruct;
+}
+
+
+
+
+table TableWithPointingStruct {
+	data : PointingStruct;
+	more : PointingStruct;
+}
+
+
+root_type TableWithPointingStruct;
+

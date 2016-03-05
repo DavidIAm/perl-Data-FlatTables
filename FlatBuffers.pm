@@ -537,6 +537,8 @@ sub serialize {
 				my $value = $reloc->{item}{serialized_offset};
 				if (defined $reloc->{lambda}) { # allow the reloc to have a custom format
 					$value = $reloc->{lambda}($value);
+				} elsif (defined $reloc->{type} and $reloc->{type} eq "unsigned delta") {
+					$value = pack "L<", $value - $part->{serialized_offset} - $reloc->{offset};
 				} else {
 					$value = pack "l<", $value;
 				}
@@ -665,8 +667,7 @@ sub serialize_data {
 			$code .= "
 		my \$string_object = \$self->serialize_string(\$self->$field->{name});
 		push \@objects, \$string_object;
-		my \$closured_offset = \$offset; # necessary, otherwise a changed offset will be closured
-		push \@reloc, { offset => \$offset, item => \$string_object, lambda => sub { pack 'L<', \$_[0] - \$data_object->{serialized_offset} - \$closured_offset } };";
+		push \@reloc, { offset => \$offset, item => \$string_object, type => 'unsigned delta'};";
 		} else { # table serialization
 			my $table_type = $self->table_types->{$field->{type}} // die "no such type found: $field->{type}";
 			# my $typename = $table_type->{typename};
@@ -676,14 +677,14 @@ sub serialize_data {
 		my \@table_objects = \$self->$field->{name}->serialize_data;
 		my \$root_object = \$table_objects[0];
 		push \@objects, \@table_objects;
-		my \$closured_offset = \$offset; # necessary, otherwise a changed offset will be closured
-		push \@reloc, { offset => \$offset, item => \$root_object, lambda => sub { pack 'L<', \$_[0] - \$data_object->{serialized_offset} - \$closured_offset } };";
+		push \@reloc, { offset => \$offset, item => \$root_object, type => 'unsigned delta' };";
 			} elsif ($table_type->{type} eq 'struct') {
 				$code .= "
 		my \@struct_objects = \$self->$field->{name}->serialize_data;
 		my \$root_object = shift \@struct_objects;
 		\$data .= \$root_object->{data};
 		push \@objects, \@struct_objects;
+		push \@reloc, map { \$_->{offset} += \$offset; \$_ } \@{\$root_object->{reloc}};
 		\$offset += length(\$root_object->{data}) - 4;";
 			} else {
 				...
@@ -815,10 +816,12 @@ sub deserialize {
 		} elsif ($field->{type} eq 'double') {
 			$code .= "\$self->$field->{name}(unpack 'd<', substr \$data, \$offset + $offset, 8);";
 		} elsif ($field->{type} eq 'string') {
-			$code .= 'my $string_offset = $offset + '.$offset.' + unpack "L<", substr $data, $offset + '.$offset.', 4;
+			$code .= 'do {
+		my $string_offset = $offset + '.$offset.' + unpack "L<", substr $data, $offset + '.$offset.', 4;
 		my $string_length = unpack "L<", substr $data, $string_offset, 4;';
 			$code .= "
-		\$self->$field->{name}(substr \$data, \$string_offset + 4, \$string_length);";
+		\$self->$field->{name}(substr \$data, \$string_offset + 4, \$string_length);
+	};";
 		} else {
 			my $table_type = $self->table_types->{$field->{type}} // die "no such type found: $field->{type}";
 			my $typename = $table_type->{typename};
@@ -885,10 +888,11 @@ sub serialize_data {
 		} elsif ($field->{type} eq 'string') {
 			$code .= '$data .= "\0\0\0\0";';
 			$code .= "
-	my \$string_object = \$self->serialize_string(\$self->$field->{name});
-	push \@objects, \$string_object;
-	my \$$field->{name}_offset = \$offset; # necessary, otherwise a changed offset will be closured
-	push \@reloc, { offset => \$offset, item => \$string_object, lambda => sub { pack 'L<', \$_[0] - \$data_object->{serialized_offset} - $offset } };";
+	do {
+		my \$string_object = \$self->serialize_string(\$self->$field->{name});
+		push \@objects, \$string_object;
+		push \@reloc, { offset => $offset, item => \$string_object, type => 'unsigned delta' };
+	};";
 		} else { # table serialization
 			my $table_type = $self->table_types->{$field->{type}} // die "no such type found: $field->{type}";
 			# my $typename = $table_type->{typename};
@@ -899,7 +903,7 @@ sub serialize_data {
 		my \@table_objects = \$self->$field->{name}->serialize_data;
 		my \$root_object = \$table_objects[0];
 		push \@objects, \@table_objects;
-		push \@reloc, { offset => \$offset, item => \$root_object, lambda => sub { pack 'L<', \$_[0] - \$data_object->{serialized_offset} - $offset } };
+		push \@reloc, { offset => $offset, item => \$root_object, type => 'unsigned delta' };
 	};";
 			} elsif ($table_type->{type} eq 'struct') {
 				$code .= "

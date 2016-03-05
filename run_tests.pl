@@ -16,7 +16,7 @@ use FlatBuffers;
 
 
 # settings
-my $flatbuffers_compiler = 'flatc';
+my $flatbuffers_compiler = '~/Downloads/flatbuffers/flatc';
 
 my %loaded_files; # prevent double loading files
 
@@ -50,7 +50,7 @@ sub test_perl_to_perl {
 	compare_hashes($data, $res);
 
 	say "all correct perl to perl for class $class with file $file";
-	
+
 	# cleanup
 	unlink 'out.bin';
 }
@@ -239,7 +239,19 @@ test_flatbuffers_to_perl('Test1::TableWithComplexStruct' => 'fbs/complex_struct.
 });
 
 
-# test_perl_to_perl('Test1::TableWithPointingStruct' => 'fbs/pointing_struct.fbs', {
-# 	data => { name => 'name', value => 'value', child1 => {}, child2 => {} },
-# });
+test_perl_to_perl('Test1::TableWithPointingStruct' => 'fbs/pointing_struct.fbs', {
+	data => { name => 'name', value => 'value', child1 => {}, child2 => {} },
+});
+test_perl_to_perl('Test1::TableWithPointingStruct' => 'fbs/pointing_struct.fbs', {
+	data => { name => 'qwerty', value => 'uiop', child1 => {}, child2 => {} },
+	more => { name => 'test', value => 'asdf', child1 => {}, child2 => {} },
+});
+test_perl_to_perl('Test1::TableWithPointingStruct' => 'fbs/pointing_struct.fbs', {
+	data => { name => 'name', value => 'value', child1 => {
+		data => { name => 'wwgaerge', value => '', child1 => {}, child2 => {} }
+		}, child2 => {} },
+	more => { name => 'test', value => 'asdf', child1 => {}, child2 => {} },
+});
 
+
+# no testing of pointing_struct.fbs with flatbuffers because flatbuffers doesn't support structs with string or table values
