@@ -16,7 +16,7 @@ use FlatBuffers;
 
 
 # settings
-my $flatbuffers_compiler = '~/Downloads/flatbuffers/flatc';
+my $flatbuffers_compiler = 'flatc';
 
 my %loaded_files; # prevent double loading files
 

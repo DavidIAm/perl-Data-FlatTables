@@ -108,6 +108,28 @@ my $regex_type_decl = qr/ ( table | struct )\s+$regex_ident\s+$regex_metadata\s*
 
 
 
+
+
+my %flatbuffers_basic_types = (
+	bool => { format => "C", length => 1 },
+	byte => { format => "c", length => 1 },
+	ubyte => { format => "C", length => 1 },
+	short => { format => "s<", length => 2 },
+	ushort => { format => "S<", length => 2 },
+	int => { format => "l<", length => 4 },
+	uint => { format => "L<", length => 4 },
+	float => { format => "f<", length => 4 },
+	long => { format => "q<", length => 8 },
+	ulong => { format => "Q<", length => 8 },
+	double => { format => "d<", length => 8 },
+);
+
+
+
+
+
+
+
 sub new {
 	my $class = shift;
 	my %args = @_;
@@ -474,37 +496,21 @@ sub deserialize {
 	\$offset = unpack 'S<', substr \$data, \$vtable_offset + $vtable_iterator, 2;
 	if (\$offset != 0) {
 		";
-		if ($field->{type} eq 'bool') {
-			$code .= "\$self->$field->{name}(unpack 'C', substr \$data, \$object_offset + \$offset, 1);";
-		} elsif ($field->{type} eq 'byte') {
-			$code .= "\$self->$field->{name}(unpack 'c', substr \$data, \$object_offset + \$offset, 1);";
-		} elsif ($field->{type} eq 'ubyte') {
-			$code .= "\$self->$field->{name}(unpack 'C', substr \$data, \$object_offset + \$offset, 1);";
-		} elsif ($field->{type} eq 'short') {
-			$code .= "\$self->$field->{name}(unpack 's<', substr \$data, \$object_offset + \$offset, 2);";
-		} elsif ($field->{type} eq 'ushort') {
-			$code .= "\$self->$field->{name}(unpack 'S<', substr \$data, \$object_offset + \$offset, 2);";
-		} elsif ($field->{type} eq 'int') {
-			$code .= "\$self->$field->{name}(unpack 'l<', substr \$data, \$object_offset + \$offset, 4);";
-		} elsif ($field->{type} eq 'uint') {
-			$code .= "\$self->$field->{name}(unpack 'L<', substr \$data, \$object_offset + \$offset, 4);";
-		} elsif ($field->{type} eq 'float') {
-			$code .= "\$self->$field->{name}(unpack 'f<', substr \$data, \$object_offset + \$offset, 4);";
-		} elsif ($field->{type} eq 'long') {
-			$code .= "\$self->$field->{name}(unpack 'q<', substr \$data, \$object_offset + \$offset, 8);";
-		} elsif ($field->{type} eq 'ulong') {
-			$code .= "\$self->$field->{name}(unpack 'Q<', substr \$data, \$object_offset + \$offset, 8);";
-		} elsif ($field->{type} eq 'double') {
-			$code .= "\$self->$field->{name}(unpack 'd<', substr \$data, \$object_offset + \$offset, 8);";
+		if (exists $flatbuffers_basic_types{$field->{type}}) {
+			my $type = $flatbuffers_basic_types{$field->{type}};
+			$code .= "\$self->$field->{name}(unpack '$type->{format}', substr \$data, \$object_offset + \$offset, $type->{length});";
+
 		} elsif ($field->{type} eq 'string') {
 			$code .= 'my $string_offset = $object_offset + $offset + unpack "L<", substr $data, $object_offset + $offset, 4;
 		my $string_length = unpack "L<", substr $data, $string_offset, 4;';
 			$code .= "
 		\$self->$field->{name}(substr \$data, \$string_offset + 4, \$string_length);";
+
 		} elsif ($self->is_array_type($field->{type})) {
 			$code .= 'my $array_offset = $object_offset + $offset + unpack "L<", substr $data, $object_offset + $offset, 4;';
 			$code .= "
 		\$self->$field->{name}(\$self->deserialize_array('$field->{type}', \$data, \$array_offset));";
+
 		} else {
 			my $table_type = $self->table_types->{$field->{type}} // die "no such type found: $field->{type}";
 			my $typename = $table_type->{typename};
@@ -699,28 +705,8 @@ sub serialize_data {
 		$code .= "
 	if (defined \$self->$field->{name}) {
 		";
-		if ($field->{type} eq 'bool') {
-			$code .= "\$data .= pack 'C', \$self->$field->{name};";
-		} elsif ($field->{type} eq 'byte') {
-			$code .= "\$data .= pack 'c', \$self->$field->{name};";
-		} elsif ($field->{type} eq 'ubyte') {
-			$code .= "\$data .= pack 'C', \$self->$field->{name};";
-		} elsif ($field->{type} eq 'short') {
-			$code .= "\$data .= pack 's<', \$self->$field->{name};";
-		} elsif ($field->{type} eq 'ushort') {
-			$code .= "\$data .= pack 'S<', \$self->$field->{name};";
-		} elsif ($field->{type} eq 'int') {
-			$code .= "\$data .= pack 'l<', \$self->$field->{name};";
-		} elsif ($field->{type} eq 'uint') {
-			$code .= "\$data .= pack 'L<', \$self->$field->{name};";
-		} elsif ($field->{type} eq 'float') {
-			$code .= "\$data .= pack 'f<', \$self->$field->{name};";
-		} elsif ($field->{type} eq 'long') {
-			$code .= "\$data .= pack 'q<', \$self->$field->{name};";
-		} elsif ($field->{type} eq 'ulong') {
-			$code .= "\$data .= pack 'Q<', \$self->$field->{name};";
-		} elsif ($field->{type} eq 'double') {
-			$code .= "\$data .= pack 'd<', \$self->$field->{name};";
+		if (exists $flatbuffers_basic_types{$field->{type}}) {
+			$code .= "\$data .= pack '$flatbuffers_basic_types{$field->{type}}{format}', \$self->$field->{name};";
 
 		} elsif ($field->{type} eq 'string') {
 			$code .= '$data .= "\0\0\0\0";';
@@ -878,28 +864,10 @@ sub deserialize {
 	for my $field (@{$data->{fields}}) {
 		$code .= "
 	";
-		if ($field->{type} eq 'bool') {
-			$code .= "\$self->$field->{name}(unpack 'C', substr \$data, \$offset + $offset, 1);";
-		} elsif ($field->{type} eq 'byte') {
-			$code .= "\$self->$field->{name}(unpack 'c', substr \$data, \$offset + $offset, 1);";
-		} elsif ($field->{type} eq 'ubyte') {
-			$code .= "\$self->$field->{name}(unpack 'C', substr \$data, \$offset + $offset, 1);";
-		} elsif ($field->{type} eq 'short') {
-			$code .= "\$self->$field->{name}(unpack 's<', substr \$data, \$offset + $offset, 2);";
-		} elsif ($field->{type} eq 'ushort') {
-			$code .= "\$self->$field->{name}(unpack 'S<', substr \$data, \$offset + $offset, 2);";
-		} elsif ($field->{type} eq 'int') {
-			$code .= "\$self->$field->{name}(unpack 'l<', substr \$data, \$offset + $offset, 4);";
-		} elsif ($field->{type} eq 'uint') {
-			$code .= "\$self->$field->{name}(unpack 'L<', substr \$data, \$offset + $offset, 4);";
-		} elsif ($field->{type} eq 'float') {
-			$code .= "\$self->$field->{name}(unpack 'f<', substr \$data, \$offset + $offset, 4);";
-		} elsif ($field->{type} eq 'long') {
-			$code .= "\$self->$field->{name}(unpack 'q<', substr \$data, \$offset + $offset, 8);";
-		} elsif ($field->{type} eq 'ulong') {
-			$code .= "\$self->$field->{name}(unpack 'Q<', substr \$data, \$offset + $offset, 8);";
-		} elsif ($field->{type} eq 'double') {
-			$code .= "\$self->$field->{name}(unpack 'd<', substr \$data, \$offset + $offset, 8);";
+		if (exists $flatbuffers_basic_types{$field->{type}}) {
+			my $type = $flatbuffers_basic_types{$field->{type}};
+			$code .= "\$self->$field->{name}(unpack '$type->{format}', substr \$data, \$offset + $offset, $type->{length});";
+
 		} elsif ($field->{type} eq 'string') {
 			$code .= 'do {
 		my $string_offset = $offset + '.$offset.' + unpack "L<", substr $data, $offset + '.$offset.', 4;
@@ -907,6 +875,7 @@ sub deserialize {
 			$code .= "
 		\$self->$field->{name}(substr \$data, \$string_offset + 4, \$string_length);
 	};";
+
 		} else {
 			my $table_type = $self->table_types->{$field->{type}} // die "no such type found: $field->{type}";
 			my $typename = $table_type->{typename};
@@ -948,28 +917,10 @@ sub serialize_data {
 	for my $field (@{$data->{fields}}) {
 		$code .= "
 	";
-		if ($field->{type} eq 'bool') {
-			$code .= "\$data .= pack 'C', \$self->$field->{name} // die 'struct $data->{typename} requires field $field->{name}';";
-		} elsif ($field->{type} eq 'byte') {
-			$code .= "\$data .= pack 'c', \$self->$field->{name} // die 'struct $data->{typename} requires field $field->{name}';";
-		} elsif ($field->{type} eq 'ubyte') {
-			$code .= "\$data .= pack 'C', \$self->$field->{name} // die 'struct $data->{typename} requires field $field->{name}';";
-		} elsif ($field->{type} eq 'short') {
-			$code .= "\$data .= pack 's<', \$self->$field->{name} // die 'struct $data->{typename} requires field $field->{name}';";
-		} elsif ($field->{type} eq 'ushort') {
-			$code .= "\$data .= pack 'S<', \$self->$field->{name} // die 'struct $data->{typename} requires field $field->{name}';";
-		} elsif ($field->{type} eq 'int') {
-			$code .= "\$data .= pack 'l<', \$self->$field->{name} // die 'struct $data->{typename} requires field $field->{name}';";
-		} elsif ($field->{type} eq 'uint') {
-			$code .= "\$data .= pack 'L<', \$self->$field->{name} // die 'struct $data->{typename} requires field $field->{name}';";
-		} elsif ($field->{type} eq 'float') {
-			$code .= "\$data .= pack 'f<', \$self->$field->{name} // die 'struct $data->{typename} requires field $field->{name}';";
-		} elsif ($field->{type} eq 'long') {
-			$code .= "\$data .= pack 'q<', \$self->$field->{name} // die 'struct $data->{typename} requires field $field->{name}';";
-		} elsif ($field->{type} eq 'ulong') {
-			$code .= "\$data .= pack 'Q<', \$self->$field->{name} // die 'struct $data->{typename} requires field $field->{name}';";
-		} elsif ($field->{type} eq 'double') {
-			$code .= "\$data .= pack 'd<', \$self->$field->{name} // die 'struct $data->{typename} requires field $field->{name}';";
+		if (exists $flatbuffers_basic_types{$field->{type}}) {
+			my $type = $flatbuffers_basic_types{$field->{type}};
+			$code .= "\$data .= pack '$type->{format}', \$self->$field->{name} // die 'struct $data->{typename} requires field $field->{name}';";
+
 		} elsif ($field->{type} eq 'string') {
 			$code .= '$data .= "\0\0\0\0";';
 			$code .= "
@@ -978,6 +929,7 @@ sub serialize_data {
 		push \@objects, \$string_object;
 		push \@reloc, { offset => $offset, item => \$string_object, type => 'unsigned delta' };
 	};";
+	
 		} else { # table serialization
 			my $table_type = $self->table_types->{$field->{type}} // die "no such type found: $field->{type}";
 			# my $typename = $table_type->{typename};
