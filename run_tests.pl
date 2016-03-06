@@ -290,3 +290,22 @@ test_flatbuffers_to_perl('Test1::Vectory' => 'fbs/vectory.fbs', { vals => [-50 .
 test_flatbuffers_to_perl('Test1::Vectory' => 'fbs/vectory.fbs', { id => 15, name => 'test', vals => [-50 .. 50], padding => 500 });
 test_flatbuffers_to_perl('Test1::Vectory' => 'fbs/vectory.fbs', { id => 1, name => 'emptytest', padding => 400 });
 
+
+
+test_perl_to_perl('Test1::StringyVectors' => 'fbs/string_vectors.fbs', { keys => [qw/ a /], vals => [qw/ b /], });
+test_perl_to_perl('Test1::StringyVectors' => 'fbs/string_vectors.fbs', { keys => [qw/ apple bananna cherry /], vals => [qw/ a b c /], });
+test_perl_to_perl('Test1::StringyVectors' => 'fbs/string_vectors.fbs', { id => 5, keys => ['a' .. 'z'], vals => ['A' .. 'Z'], pad2 => 15, });
+test_perl_to_perl('Test1::StringyVectors' => 'fbs/string_vectors.fbs', { id => 7, keys => [], pad2 => -1, });
+
+test_perl_to_flatbuffers('Test1::StringyVectors' => 'fbs/string_vectors.fbs', { keys => [qw/ a /], vals => [qw/ b /], });
+test_perl_to_flatbuffers('Test1::StringyVectors' => 'fbs/string_vectors.fbs', { keys => [qw/ apple bananna cherry /], vals => [qw/ a b c /], });
+test_perl_to_flatbuffers('Test1::StringyVectors' => 'fbs/string_vectors.fbs', { id => 5, keys => ['a' .. 'z'], vals => ['A' .. 'Z'], pad2 => 15, });
+test_perl_to_flatbuffers('Test1::StringyVectors' => 'fbs/string_vectors.fbs', { id => 7, keys => [], pad2 => -1, });
+
+test_flatbuffers_to_perl('Test1::StringyVectors' => 'fbs/string_vectors.fbs', { keys => [qw/ a /], vals => [qw/ b /], });
+test_flatbuffers_to_perl('Test1::StringyVectors' => 'fbs/string_vectors.fbs', { keys => [qw/ apple bananna cherry /], vals => [qw/ a b c /], });
+test_flatbuffers_to_perl('Test1::StringyVectors' => 'fbs/string_vectors.fbs', { id => 5, keys => ['a' .. 'z'], vals => ['A' .. 'Z'], pad2 => 15, });
+test_flatbuffers_to_perl('Test1::StringyVectors' => 'fbs/string_vectors.fbs', { id => 7, keys => [], pad2 => -1, });
+
+
+

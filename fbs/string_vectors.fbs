@@ -1,0 +1,13 @@
+
+namespace Test1;
+
+
+table StringyVectors {
+	id : byte;
+	keys : [string];
+	vals : [string];
+	pad1 : int;
+	pad2 : int;
+}
+
+root_type StringyVectors;
