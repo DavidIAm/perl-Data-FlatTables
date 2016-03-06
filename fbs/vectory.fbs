@@ -1,0 +1,13 @@
+
+namespace Test1;
+
+
+table Vectory {
+	id : int;
+	name : string;
+	vals : [int];
+	padding : int;
+}
+
+
+root_type Vectory;

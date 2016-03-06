@@ -21,6 +21,21 @@ my $flatbuffers_compiler = '~/Downloads/flatbuffers/flatc';
 my %loaded_files; # prevent double loading files
 
 
+sub compare_arrays {
+	my ($array1, $array2) = @_;
+	for my $i (0 .. $#$array1, 0 .. $#$array2) {
+		if (not defined $array2->[$i]) {
+			die "incorrect decoding for index #$i: undef <=> $array1->[$i]" if defined $array1->[$i];
+		} elsif (ref $array1->[$i] eq 'HASH') {
+			compare_hashes($array1->[$i], $array2->[$i]);
+		} elsif (ref $array1->[$i] eq 'ARRAY') {
+			compare_arrays($array1->[$i], $array2->[$i]);
+		} else {
+			die "incorrect decoding for index #$i: $array2->[$i] <=> $array1->[$i]" if $array2->[$i] ne $array1->[$i];
+		}
+	}
+}
+
 
 sub compare_hashes {
 	my ($hash1, $hash2) = @_;
@@ -29,6 +44,8 @@ sub compare_hashes {
 			die "incorrect decoding for field '$field': undef <=> $hash1->{$field}" if defined $hash1->{$field};
 		} elsif (ref $hash1->{$field} eq 'HASH') {
 			compare_hashes($hash1->{$field}, $hash2->{$field});
+		} elsif (ref $hash1->{$field} eq 'ARRAY') {
+			compare_arrays($hash1->{$field}, $hash2->{$field});
 		} else {
 			die "incorrect decoding for field '$field': $hash2->{$field} <=> $hash1->{$field}" if $hash2->{$field} ne $hash1->{$field};
 		}
@@ -255,3 +272,21 @@ test_perl_to_perl('Test1::TableWithPointingStruct' => 'fbs/pointing_struct.fbs',
 
 
 # no testing of pointing_struct.fbs with flatbuffers because flatbuffers doesn't support structs with string or table values
+
+
+
+test_perl_to_perl('Test1::Vectory' => 'fbs/vectory.fbs', { vals => [1, 3, 5, 16, 0], });
+test_perl_to_perl('Test1::Vectory' => 'fbs/vectory.fbs', { vals => [-50 .. 50], });
+test_perl_to_perl('Test1::Vectory' => 'fbs/vectory.fbs', { id => 15, name => 'test', vals => [-50 .. 50], padding => 500 });
+test_perl_to_perl('Test1::Vectory' => 'fbs/vectory.fbs', { id => 1, name => 'emptytest', padding => 400 });
+
+test_perl_to_flatbuffers('Test1::Vectory' => 'fbs/vectory.fbs', { vals => [1, 3, 5, 16, 0], });
+test_perl_to_flatbuffers('Test1::Vectory' => 'fbs/vectory.fbs', { vals => [-50 .. 50], });
+test_perl_to_flatbuffers('Test1::Vectory' => 'fbs/vectory.fbs', { id => 15, name => 'test', vals => [-50 .. 50], padding => 500 });
+test_perl_to_flatbuffers('Test1::Vectory' => 'fbs/vectory.fbs', { id => 1, name => 'emptytest', padding => 400 });
+
+test_flatbuffers_to_perl('Test1::Vectory' => 'fbs/vectory.fbs', { vals => [1, 3, 5, 16, 0], });
+test_flatbuffers_to_perl('Test1::Vectory' => 'fbs/vectory.fbs', { vals => [-50 .. 50], });
+test_flatbuffers_to_perl('Test1::Vectory' => 'fbs/vectory.fbs', { id => 15, name => 'test', vals => [-50 .. 50], padding => 500 });
+test_flatbuffers_to_perl('Test1::Vectory' => 'fbs/vectory.fbs', { id => 1, name => 'emptytest', padding => 400 });
+

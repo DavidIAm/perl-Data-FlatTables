@@ -17,7 +17,6 @@ use Data::Dumper;
 # TODO:
 	# anonymous package creation
 	# source filter for transparent creation
-	# struct support
 	# enum support
 	# file identifier support
 	# file inclusion
@@ -402,6 +401,16 @@ sub is_basic_type {
 	/
 }
 
+sub is_array_type {
+	my ($self, $type) = @_;
+	return $type =~ /\A\[/
+}
+
+sub strip_array_brackets {
+	my ($self, $type) = @_;
+	return $type =~ s/\A\[(.*)\]\Z/$1/sr
+}
+
 sub compile_table_type {
 	my ($self, $data) = @_;
 	
@@ -422,6 +431,8 @@ sub new {
 	# setting all fields from args
 	for my $field (@{$data->{fields}}) {
 		if ($self->is_basic_type($field->{type})) {
+			$code .= "\t\$self->$field->{name}(\$args{$field->{name}}) if exists \$args{$field->{name}};\n";
+		} elsif ($self->is_array_type($field->{type})) {
 			$code .= "\t\$self->$field->{name}(\$args{$field->{name}}) if exists \$args{$field->{name}};\n";
 		} else {
 			my $table_type = $self->table_types->{$field->{type}} // die "no such type found: $field->{type}";
@@ -490,6 +501,10 @@ sub deserialize {
 		my $string_length = unpack "L<", substr $data, $string_offset, 4;';
 			$code .= "
 		\$self->$field->{name}(substr \$data, \$string_offset + 4, \$string_length);";
+		} elsif ($self->is_array_type($field->{type})) {
+			$code .= 'my $array_offset = $object_offset + $offset + unpack "L<", substr $data, $object_offset + $offset, 4;';
+			$code .= "
+		\$self->$field->{name}(\$self->deserialize_array('$field->{type}', \$data, \$array_offset));";
 		} else {
 			my $table_type = $self->table_types->{$field->{type}} // die "no such type found: $field->{type}";
 			my $typename = $table_type->{typename};
@@ -505,6 +520,50 @@ sub deserialize {
 	$code .= '
 	return $self
 }
+';
+
+	$code .= '
+my %basic_types = (
+	bool => { format => "C", length => 1 },
+	byte => { format => "c", length => 1 },
+	ubyte => { format => "C", length => 1 },
+	short => { format => "s<", length => 2 },
+	ushort => { format => "S<", length => 2 },
+	int => { format => "l<", length => 4 },
+	uint => { format => "L<", length => 4 },
+	float => { format => "f<", length => 4 },
+	long => { format => "q<", length => 8 },
+	ulong => { format => "Q<", length => 8 },
+	double => { format => "d<", length => 8 },
+);
+
+sub deserialize_array {
+	my ($self, $array_type, $data, $offset) = @_;
+
+	$array_type = $self->strip_array_brackets($array_type);
+	my $array_length = unpack "L<", substr $data, $offset, 4;
+	$offset += 4;
+
+	my @array;
+	if (exists $basic_types{$array_type}) {
+		push @array, 
+			map { unpack $basic_types{$array_type}{format}, $_ }
+			map { substr $data, $offset + $_, $basic_types{$array_type}{length} }
+			map $_ * $basic_types{$array_type}{length},
+			0 .. ($array_length - 1);
+		
+	} else {
+		...
+	}
+
+	return \@array
+}
+
+sub strip_array_brackets {
+	my ($self, $type) = @_;
+	return $type =~ s/\A\[(.*)\]\Z/$1/sr
+}
+
 ';
 
 
@@ -563,7 +622,7 @@ sub serialize_vtable {
 
 	# field offset serializers
 	for my $field (@{$data->{fields}}) {
-		if ($self->is_basic_type($field->{type})) {
+		if ($self->is_basic_type($field->{type}) or $self->is_array_type($field->{type})) {
 			$code .= "
 	if (defined \$self->$field->{name}) {
 		push \@data, \$offset;
@@ -662,12 +721,21 @@ sub serialize_data {
 			$code .= "\$data .= pack 'Q<', \$self->$field->{name};";
 		} elsif ($field->{type} eq 'double') {
 			$code .= "\$data .= pack 'd<', \$self->$field->{name};";
+
 		} elsif ($field->{type} eq 'string') {
 			$code .= '$data .= "\0\0\0\0";';
 			$code .= "
 		my \$string_object = \$self->serialize_string(\$self->$field->{name});
 		push \@objects, \$string_object;
 		push \@reloc, { offset => \$offset, item => \$string_object, type => 'unsigned delta'};";
+
+		} elsif ($self->is_array_type($field->{type})) {
+			$code .= '$data .= "\0\0\0\0";';
+			$code .= "
+		my \$array_object = \$self->serialize_array('$field->{type}', \$self->$field->{name});
+		push \@objects, \$array_object;
+		push \@reloc, { offset => \$offset, item => \$array_object, type => 'unsigned delta'};";
+
 		} else { # table serialization
 			my $table_type = $self->table_types->{$field->{type}} // die "no such type found: $field->{type}";
 			# my $typename = $table_type->{typename};
@@ -721,6 +789,23 @@ sub serialize_string {
 
 	return { type => "string", data => $data }
 }
+
+
+sub serialize_array {
+	my ($self, $array_type, $array) = @_;
+
+	$array_type = $self->strip_array_brackets($array_type);
+	my $data = pack "L<", scalar @$array;
+
+	if (exists $basic_types{$array_type}) {
+		$data .= join "", map { pack $basic_types{$array_type}{format}, $_ } @$array;
+	} else {
+		...
+	}
+
+	return { type => "array", data => $data }
+}
+
 ';
 
 	# package footer
