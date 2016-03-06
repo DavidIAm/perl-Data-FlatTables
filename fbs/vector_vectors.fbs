@@ -1,0 +1,10 @@
+
+namespace Test1;
+
+table VectorVectorsTable {
+	vals : [[int]];
+	morevals : [[[int]]];
+	stringvals : [[string]];
+}
+
+root_type VectorVectorsTable;

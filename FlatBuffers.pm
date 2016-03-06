@@ -548,6 +548,17 @@ my %basic_types = (
 	double => { format => "d<", length => 8 },
 );
 
+
+sub is_array_type {
+	my ($self, $type) = @_;
+	return $type =~ /\A\[/
+}
+
+sub strip_array_brackets {
+	my ($self, $type) = @_;
+	return $type =~ s/\A\[(.*)\]\Z/$1/sr
+}
+
 sub deserialize_array {
 	my ($self, $array_type, $data, $offset) = @_;
 
@@ -568,17 +579,17 @@ sub deserialize_array {
 		@array = map { $self->deserialize_string($data, $offset + $_) }
 			map $_ * 4,
 			0 .. ($array_length - 1);
+
+	} elsif ($self->is_array_type($array_type)) { # if its an array of strings
+		@array = map { $self->deserialize_array($array_type, $data, $offset + $_) }
+			map $_ * 4,
+			0 .. ($array_length - 1);
 	
 	} else {
 		...
 	}
 
 	return \@array
-}
-
-sub strip_array_brackets {
-	my ($self, $type) = @_;
-	return $type =~ s/\A\[(.*)\]\Z/$1/sr
 }
 
 ';
@@ -805,6 +816,13 @@ sub serialize_array {
 			my $string_object = $self->serialize_string($array->[$i]);
 			push @array_objects, $string_object;
 			push @reloc, { offset => 4 + $i * 4, item => $string_object, type => "unsigned delta" };
+		}
+	} elsif ($self->is_array_type($array_type)) {
+		$data .= "\0\0\0\0" x @$array;
+		for my $i (0 .. $#$array) {
+			my ($array_object, @child_array_objects) = $self->serialize_array($array_type, $array->[$i]);
+			push @array_objects, $array_object, @child_array_objects;
+			push @reloc, { offset => 4 + $i * 4, item => $array_object, type => "unsigned delta" };
 		}
 
 	} else {

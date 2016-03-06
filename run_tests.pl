@@ -6,6 +6,7 @@ use feature qw/ say /;
 
 use File::Slurper qw/ read_text write_binary write_text read_binary /;
 use JSON;
+use Data::Dumper;
 
 use FlatBuffers;
 
@@ -13,6 +14,7 @@ use FlatBuffers;
 # bool values cannot be tested properly because the JSON package decodes boolean as strings instead of 0/1
 # 0 integer values are mostly incompatible with flatbuffers because flatbuffers for some reason just skips the fields 0 value when serializing
 # flatbuffers forbids anything but scalars and struct fields
+# flatbuffers doesnt support nested arrays
 
 
 # settings
@@ -27,8 +29,10 @@ sub compare_arrays {
 		if (not defined $array2->[$i]) {
 			die "incorrect decoding for index #$i: undef <=> $array1->[$i]" if defined $array1->[$i];
 		} elsif (ref $array1->[$i] eq 'HASH') {
+			die "lack of hash at index $i" if not defined $array2->[$i];
 			compare_hashes($array1->[$i], $array2->[$i]);
 		} elsif (ref $array1->[$i] eq 'ARRAY') {
+			die "lack of array at index $i" if not defined $array2->[$i];
 			compare_arrays($array1->[$i], $array2->[$i]);
 		} else {
 			die "incorrect decoding for index #$i: $array2->[$i] <=> $array1->[$i]" if $array2->[$i] ne $array1->[$i];
@@ -43,8 +47,10 @@ sub compare_hashes {
 		if (not defined $hash2->{$field}) {
 			die "incorrect decoding for field '$field': undef <=> $hash1->{$field}" if defined $hash1->{$field};
 		} elsif (ref $hash1->{$field} eq 'HASH') {
+			die "lack of hash at index '$field'" if not defined $hash2->{$field};
 			compare_hashes($hash1->{$field}, $hash2->{$field});
 		} elsif (ref $hash1->{$field} eq 'ARRAY') {
+			die "lack of array at index '$field'" if not defined $hash2->{$field};
 			compare_arrays($hash1->{$field}, $hash2->{$field});
 		} else {
 			die "incorrect decoding for field '$field': $hash2->{$field} <=> $hash1->{$field}" if $hash2->{$field} ne $hash1->{$field};
@@ -82,7 +88,7 @@ sub test_perl_to_flatbuffers {
 	# serialize and write to file
 	write_binary('out.bin', $class->new(%$data)->serialize);
 	# have flatbuffers parse it to json
-	`$flatbuffers_compiler -t --strict-json --raw-binary $file -- out.bin`;
+	print `$flatbuffers_compiler -t --strict-json --raw-binary $file -- out.bin`;
 	# read the json
 	my $res = decode_json read_text('out.json');
 
@@ -105,7 +111,7 @@ sub test_flatbuffers_to_perl {
 	write_text('out.json', encode_json $data);
 
 	# compile it to binary with flatbuffers
-	`$flatbuffers_compiler -b $file out.json`;
+	print `$flatbuffers_compiler -b $file out.json`;
 
 	# deserialize the binary with perl FlatBuffers
 	my $serialized_data = read_binary('out.bin');
@@ -271,7 +277,33 @@ test_perl_to_perl('Test1::TableWithPointingStruct' => 'fbs/pointing_struct.fbs',
 });
 
 
-# no testing of pointing_struct.fbs with flatbuffers because flatbuffers doesn't support structs with string or table values
+# # no testing of pointing_struct.fbs with flatbuffers because flatbuffers doesn't support structs with string or table values
+# test_perl_to_flatbuffers('Test1::TableWithPointingStruct' => 'fbs/pointing_struct.fbs', {
+# 	data => { name => 'name', value => 'value', child1 => {}, child2 => {} },
+# });
+# test_perl_to_flatbuffers('Test1::TableWithPointingStruct' => 'fbs/pointing_struct.fbs', {
+# 	data => { name => 'qwerty', value => 'uiop', child1 => {}, child2 => {} },
+# 	more => { name => 'test', value => 'asdf', child1 => {}, child2 => {} },
+# });
+# test_perl_to_flatbuffers('Test1::TableWithPointingStruct' => 'fbs/pointing_struct.fbs', {
+# 	data => { name => 'name', value => 'value', child1 => {
+# 		data => { name => 'wwgaerge', value => '', child1 => {}, child2 => {} }
+# 		}, child2 => {} },
+# 	more => { name => 'test', value => 'asdf', child1 => {}, child2 => {} },
+# });
+# test_flatbuffers_to_perl('Test1::TableWithPointingStruct' => 'fbs/pointing_struct.fbs', {
+# 	data => { name => 'name', value => 'value', child1 => {}, child2 => {} },
+# });
+# test_flatbuffers_to_perl('Test1::TableWithPointingStruct' => 'fbs/pointing_struct.fbs', {
+# 	data => { name => 'qwerty', value => 'uiop', child1 => {}, child2 => {} },
+# 	more => { name => 'test', value => 'asdf', child1 => {}, child2 => {} },
+# });
+# test_flatbuffers_to_perl('Test1::TableWithPointingStruct' => 'fbs/pointing_struct.fbs', {
+# 	data => { name => 'name', value => 'value', child1 => {
+# 		data => { name => 'wwgaerge', value => '', child1 => {}, child2 => {} }
+# 		}, child2 => {} },
+# 	more => { name => 'test', value => 'asdf', child1 => {}, child2 => {} },
+# });
 
 
 
@@ -306,6 +338,45 @@ test_flatbuffers_to_perl('Test1::StringyVectors' => 'fbs/string_vectors.fbs', { 
 test_flatbuffers_to_perl('Test1::StringyVectors' => 'fbs/string_vectors.fbs', { keys => [qw/ apple bananna cherry /], vals => [qw/ a b c /], });
 test_flatbuffers_to_perl('Test1::StringyVectors' => 'fbs/string_vectors.fbs', { id => 5, keys => ['a' .. 'z'], vals => ['A' .. 'Z'], pad2 => 15, });
 test_flatbuffers_to_perl('Test1::StringyVectors' => 'fbs/string_vectors.fbs', { id => 7, keys => [], pad2 => -1, });
+
+
+
+test_perl_to_perl('Test1::VectorVectorsTable' => 'fbs/vector_vectors.fbs', { vals => [ [5, 9, 13, 17], [ 1, 5, 7], [500, 400, 300] ], });
+test_perl_to_perl('Test1::VectorVectorsTable' => 'fbs/vector_vectors.fbs', { vals => [ [],[],[],[] ], morevals => [
+	[ [5, 9, 13, 17], [ 1, 5, 7], [500, 400, 300] ],
+	[ [1 .. 50],[400 .. 410],[100 .. 112],[] ],
+	[ [-50 .. -20], ],
+]});
+test_perl_to_perl('Test1::VectorVectorsTable' => 'fbs/vector_vectors.fbs', { morevals => [
+	[ [], [], [] ],
+	[ [], [], [], [], [] ],
+	[ [], [], [], [], [], [], [] ],
+], stringvals => [ [qw/ apple bannana cherry /], ['a' .. 'c'], [qw/ int int int int /] ] });
+
+# # no testing of fbs/vector_vectors.fbs because flatbuffers doesnt support nested arrays
+# test_perl_to_flatbuffers('Test1::VectorVectorsTable' => 'fbs/vector_vectors.fbs', { vals => [ [5, 9, 13, 17], [ 1, 5, 7], [500, 400, 300] ], });
+# test_perl_to_flatbuffers('Test1::VectorVectorsTable' => 'fbs/vector_vectors.fbs', { vals => [ [],[],[],[] ], morevals => [
+# 	[ [5, 9, 13, 17], [ 1, 5, 7], [500, 400, 300] ],
+# 	[ [1 .. 50],[400 .. 410],[100 .. 112],[] ],
+# 	[ [-50 .. -20], ],
+# ]});
+# test_perl_to_flatbuffers('Test1::VectorVectorsTable' => 'fbs/vector_vectors.fbs', { morevals => [
+# 	[ [], [], [] ],
+# 	[ [], [], [], [], [] ],
+# 	[ [], [], [], [], [], [], [] ],
+# ], stringvals => [ [qw/ apple bannana cherry /], ['a' .. 'c'], [qw/ int int int int /] ] });
+
+# test_flatbuffers_to_perl('Test1::VectorVectorsTable' => 'fbs/vector_vectors.fbs', { vals => [ [5, 9, 13, 17], [ 1, 5, 7], [500, 400, 300] ], });
+# test_flatbuffers_to_perl('Test1::VectorVectorsTable' => 'fbs/vector_vectors.fbs', { vals => [ [],[],[],[] ], morevals => [
+# 	[ [5, 9, 13, 17], [ 1, 5, 7], [500, 400, 300] ],
+# 	[ [1 .. 50],[400 .. 410],[100 .. 112],[] ],
+# 	[ [-50 .. -20], ],
+# ]});
+# test_flatbuffers_to_perl('Test1::VectorVectorsTable' => 'fbs/vector_vectors.fbs', { morevals => [
+# 	[ [], [], [] ],
+# 	[ [], [], [], [], [] ],
+# 	[ [], [], [], [], [], [], [] ],
+# ], stringvals => [ [qw/ apple bannana cherry /], ['a' .. 'c'], [qw/ int int int int /] ] });
 
 
 
