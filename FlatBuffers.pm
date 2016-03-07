@@ -318,6 +318,10 @@ sub calculate_struct_length {
 	for my $field (@{$struct->{fields}}) {
 		if ($self->is_basic_type($field->{type})) {
 			$length += $field->{length};
+		} elsif ($field->{type} eq 'string') {
+			$length += 4;
+		} elsif ($self->is_array_type($field->{type})) {
+			$length += 4;
 		} else {
 			my $table_type = $self->table_types->{$field->{type}} // die "no such type found: $field->{type}";
 			if ($table_type->{type} eq 'table') {
@@ -428,6 +432,19 @@ sub is_array_type {
 	return $type =~ /\A\[/
 }
 
+sub is_object_array_type {
+	my ($self, $type) = @_;
+	if (exists $flatbuffers_basic_types{$type}) { # if itsa basic type, then no
+		return
+	} elsif ($type eq 'string') { # if its a string, then no
+		return
+	} elsif ($self->is_array_type($type)) { # if its an array, strip the brackets and recurse
+		return $self->is_object_array_type($self->strip_array_brackets($type))
+	} else { # if its an object, return the object typename
+		return $type
+	}
+}
+
 sub strip_array_brackets {
 	my ($self, $type) = @_;
 	return $type =~ s/\A\[(.*)\]\Z/$1/sr
@@ -534,6 +551,8 @@ sub deserialize_string {
 	return substr $data, $string_offset + 4, $string_length # return a substring
 }
 
+
+
 my %basic_types = (
 	bool => { format => "C", length => 1 },
 	byte => { format => "c", length => 1 },
@@ -547,7 +566,6 @@ my %basic_types = (
 	ulong => { format => "Q<", length => 8 },
 	double => { format => "d<", length => 8 },
 );
-
 
 sub is_array_type {
 	my ($self, $type) = @_;
@@ -604,7 +622,7 @@ sub serialize {
 	my $root = $parts[0]; # get the root data structure
 
 	# header pointer to root data structure
-	unshift @parts, { type => "header", data => "\0\0\0\0", reloc => [{ offset => 0, item => $root }] };
+	unshift @parts, { type => "header", data => "\0\0\0\0", reloc => [{ offset => 0, item => $root, type => "unsigned delta" }] };
 
 	my $data = "";
 	my $offset = 0;
@@ -621,13 +639,15 @@ sub serialize {
 		if (defined $part->{reloc}) {
 			# perform address relocation
 			for my $reloc (@{$part->{reloc}}) {
-				my $value = $reloc->{item}{serialized_offset};
+				my $value;
 				if (defined $reloc->{lambda}) { # allow the reloc to have a custom format
-					$value = $reloc->{lambda}($value);
+					$value = $reloc->{lambda}($part, $reloc);
 				} elsif (defined $reloc->{type} and $reloc->{type} eq "unsigned delta") {
-					$value = pack "L<", $value - $part->{serialized_offset} - $reloc->{offset};
+					$value = pack "L<", $reloc->{item}{serialized_offset} - $part->{serialized_offset} - $reloc->{offset};
+				} elsif (defined $reloc->{type} and $reloc->{type} eq "signed negative delta") {
+					$value = pack "l<", $part->{serialized_offset} + $reloc->{offset} - $reloc->{item}{serialized_offset};
 				} else {
-					$value = pack "l<", $value;
+					...
 				}
 				substr $data, $part->{serialized_offset} + $reloc->{offset}, length($value), $value;
 			}
@@ -707,15 +727,14 @@ sub serialize_data {
 
 	my $vtable = $self->serialize_vtable;
 	my $data = "\0\0\0\0";
-	my $offset = 0;
 
-	my $data_object = { type => "table" };
+	# my $data_object = { type => "table" };
 
-	my @reloc = ({ offset => $offset, item => $vtable, lambda => sub { pack "l<", $data_object->{serialized_offset} - $_[0] } });
+	my @reloc = ({ offset => 0, item => $vtable, type => "signed negative delta" });
 	# flatbuffers vtable offset is stored in negative form
 	my @objects = ($vtable);
 
-	$offset += 4;
+	# $offset += 4;
 
 ';
 
@@ -731,43 +750,35 @@ sub serialize_data {
 			$code .= "\$data .= pack '$flatbuffers_basic_types{$field->{type}}{format}', \$self->$field->{name};";
 
 		} elsif ($field->{type} eq 'string') {
-			$code .= '$data .= "\0\0\0\0";';
-			$code .= "
-		my \$string_object = \$self->serialize_string(\$self->$field->{name});
+			$code .= qq/my \$string_object = \$self->serialize_string(\$self->$field->{name});
 		push \@objects, \$string_object;
-		push \@reloc, { offset => \$offset, item => \$string_object, type => 'unsigned delta'};";
+		push \@reloc, { offset => length (\$data), item => \$string_object, type => 'unsigned delta'};
+		\$data .= \"\\0\\0\\0\\0\";/;
 
 		} elsif ($self->is_array_type($field->{type})) {
-			$code .= '$data .= "\0\0\0\0";';
-			$code .= "
-		my (\$array_object, \@array_objects) = \$self->serialize_array('$field->{type}', \$self->$field->{name});
+			$code .= qq/my (\$array_object, \@array_objects) = \$self->serialize_array('$field->{type}', \$self->$field->{name});
 		push \@objects, \$array_object, \@array_objects;
-		push \@reloc, { offset => \$offset, item => \$array_object, type => 'unsigned delta'};";
+		push \@reloc, { offset => length (\$data), item => \$array_object, type => 'unsigned delta'};
+		\$data .= \"\\0\\0\\0\\0\";/;
 
 		} else { # table serialization
 			my $table_type = $self->table_types->{$field->{type}} // die "no such type found: $field->{type}";
 			# my $typename = $table_type->{typename};
 			if ($table_type->{type} eq 'table') {
-				$code .= '$data .= "\0\0\0\0";';
-				$code .= "
-		my \@table_objects = \$self->$field->{name}->serialize_data;
-		my \$root_object = \$table_objects[0];
-		push \@objects, \@table_objects;
-		push \@reloc, { offset => \$offset, item => \$root_object, type => 'unsigned delta' };";
+				$code .= qq/my (\$root_object, \@table_objects) = \$self->$field->{name}->serialize_data;
+		push \@objects, \$root_object, \@table_objects;
+		push \@reloc, { offset => length (\$data), item => \$root_object, type => 'unsigned delta' };
+		\$data .= \"\\0\\0\\0\\0\";/;
 			} elsif ($table_type->{type} eq 'struct') {
-				$code .= "
-		my \@struct_objects = \$self->$field->{name}->serialize_data;
-		my \$root_object = shift \@struct_objects;
-		\$data .= \$root_object->{data};
+				$code .= qq/my (\$root_object, \@struct_objects) = \$self->$field->{name}->serialize_data;
 		push \@objects, \@struct_objects;
-		push \@reloc, map { \$_->{offset} += \$offset; \$_ } \@{\$root_object->{reloc}};
-		\$offset += length(\$root_object->{data}) - 4;";
+		push \@reloc, map { \$_->{offset} += length (\$data); \$_ } \@{\$root_object->{reloc}};
+		\$data .= \$root_object->{data};/;
 			} else {
 				...
 			}
 		}
 		$code .= "
-		\$offset += $field->{length};
 	}
 ";
 	}
@@ -777,10 +788,10 @@ sub serialize_data {
 	# pad to 4 byte boundary
 	$data .= pack "x" x (4 - (length ($data) % 4)) if length ($data) % 4;
 
-	$data_object->{data} = $data;
-	$data_object->{reloc} = \@reloc;
+	# $data_object->{data} = $data;
+	# $data_object->{reloc} = \@reloc;
 	# return table data and other objects that we\'ve created
-	return $data_object, @objects
+	return { type => "table", data => $data, reloc => \@reloc }, @objects
 }
 	';
 
@@ -868,6 +879,10 @@ sub new {
 	for my $field (@{$data->{fields}}) {
 		if ($self->is_basic_type($field->{type})) {
 			$code .= "\t\$self->$field->{name}(\$args{$field->{name}});\n";
+		} elsif ($field->{type} eq 'string') {
+			$code .= "\t\$self->$field->{name}(\$args{$field->{name}});\n";
+		} elsif ($self->is_array_type($field->{type})) {
+			$code .= "\t\$self->$field->{name}(\$args{$field->{name}});\n";
 		} else {
 			my $table_type = $self->table_types->{$field->{type}} // die "no such type found: $field->{type}";
 			my $typename = $table_type->{typename};
@@ -909,12 +924,9 @@ sub deserialize {
 			$code .= "\$self->$field->{name}(unpack '$type->{format}', substr \$data, \$offset + $offset, $type->{length});";
 
 		} elsif ($field->{type} eq 'string') {
-			$code .= 'do {
-		my $string_offset = $offset + '.$offset.' + unpack "L<", substr $data, $offset + '.$offset.', 4;
-		my $string_length = unpack "L<", substr $data, $string_offset, 4;';
-			$code .= "
-		\$self->$field->{name}(substr \$data, \$string_offset + 4, \$string_length);
-	};";
+			$code .= "\$self->$field->{name}(\$self->deserialize_string(\$data, \$offset + $offset));";
+		} elsif ($self->is_array_type($field->{type})) {
+			$code .= "\$self->$field->{name}(\$self->deserialize_array('$field->{type}', \$data, \$offset + $offset));";
 
 		} else {
 			my $table_type = $self->table_types->{$field->{type}} // die "no such type found: $field->{type}";
@@ -932,7 +944,76 @@ sub deserialize {
 }
 ';
 
+	$code .= '
 
+sub deserialize_string {
+	my ($self, $data, $offset) = @_;
+
+	my $string_offset = $offset + unpack "L<", substr $data, $offset, 4; # dereference the string pointer
+	my $string_length = unpack "L<", substr $data, $string_offset, 4; # get the length
+	return substr $data, $string_offset + 4, $string_length # return a substring
+}
+
+
+
+my %basic_types = (
+	bool => { format => "C", length => 1 },
+	byte => { format => "c", length => 1 },
+	ubyte => { format => "C", length => 1 },
+	short => { format => "s<", length => 2 },
+	ushort => { format => "S<", length => 2 },
+	int => { format => "l<", length => 4 },
+	uint => { format => "L<", length => 4 },
+	float => { format => "f<", length => 4 },
+	long => { format => "q<", length => 8 },
+	ulong => { format => "Q<", length => 8 },
+	double => { format => "d<", length => 8 },
+);
+
+sub is_array_type {
+	my ($self, $type) = @_;
+	return $type =~ /\A\[/
+}
+
+sub strip_array_brackets {
+	my ($self, $type) = @_;
+	return $type =~ s/\A\[(.*)\]\Z/$1/sr
+}
+
+sub deserialize_array {
+	my ($self, $array_type, $data, $offset) = @_;
+
+	$array_type = $self->strip_array_brackets($array_type);
+
+	$offset = $offset + unpack "L<", substr $data, $offset, 4; # dereference the array pointer
+	my $array_length = unpack "L<", substr $data, $offset, 4; # get the length
+	$offset += 4;
+
+	my @array;
+	if (exists $basic_types{$array_type}) { # if its an array of numerics
+		@array = map { unpack $basic_types{$array_type}{format}, $_ }
+			map { substr $data, $offset + $_, $basic_types{$array_type}{length} }
+			map $_ * $basic_types{$array_type}{length},
+			0 .. ($array_length - 1);
+	
+	} elsif ($array_type eq "string") { # if its an array of strings
+		@array = map { $self->deserialize_string($data, $offset + $_) }
+			map $_ * 4,
+			0 .. ($array_length - 1);
+
+	} elsif ($self->is_array_type($array_type)) { # if its an array of strings
+		@array = map { $self->deserialize_array($array_type, $data, $offset + $_) }
+			map $_ * 4,
+			0 .. ($array_length - 1);
+	
+	} else {
+		...
+	}
+
+	return \@array
+}
+
+';
 
 
 	# serialize_data header
@@ -941,18 +1022,14 @@ sub serialize_data {
 	my ($self) = @_;
 
 	my $data = "";
-	my $offset = 0;
-
-	my $data_object = { type => "struct" };
-
 	my @reloc;
+
 	my @objects;
 
 ';
 
 
 
-	$offset = 0;
 	# field data serializers
 	for my $field (@{$data->{fields}}) {
 		$code .= "
@@ -962,41 +1039,44 @@ sub serialize_data {
 			$code .= "\$data .= pack '$type->{format}', \$self->$field->{name} // die 'struct $data->{typename} requires field $field->{name}';";
 
 		} elsif ($field->{type} eq 'string') {
-			$code .= '$data .= "\0\0\0\0";';
-			$code .= "
-	do {
-		my \$string_object = \$self->serialize_string(\$self->$field->{name});
-		push \@objects, \$string_object;
-		push \@reloc, { offset => $offset, item => \$string_object, type => 'unsigned delta' };
-	};";
+			$code .= qq/do {
+			my \$string_object = \$self->serialize_string(\$self->$field->{name});
+			push \@objects, \$string_object;
+			push \@reloc, { offset => length (\$data), item => \$string_object, type => 'unsigned delta'};
+			\$data .= \"\\0\\0\\0\\0\";
+		};/;
+
+		} elsif ($self->is_array_type($field->{type})) {
+			$code .= qq/do {
+			my (\$array_object, \@array_objects) = \$self->serialize_array('$field->{type}', \$self->$field->{name});
+			push \@objects, \$array_object, \@array_objects;
+			push \@reloc, { offset => length (\$data), item => \$array_object, type => 'unsigned delta'};
+			\$data .= \"\\0\\0\\0\\0\";
+		};/;
 
 		} else { # table serialization
 			my $table_type = $self->table_types->{$field->{type}} // die "no such type found: $field->{type}";
 			# my $typename = $table_type->{typename};
 			if ($table_type->{type} eq 'table') {
-				$code .= '$data .= "\0\0\0\0";';
-				$code .= "
-	do {
-		my \@table_objects = \$self->$field->{name}->serialize_data;
-		my \$root_object = \$table_objects[0];
-		push \@objects, \@table_objects;
-		push \@reloc, { offset => $offset, item => \$root_object, type => 'unsigned delta' };
-	};";
+				$code .= qq/do {
+			my (\$root_object, \@table_objects) = \$self->$field->{name}->serialize_data;
+			push \@objects, \$root_object, \@table_objects;
+			push \@reloc, { offset => length (\$data), item => \$root_object, type => 'unsigned delta' };
+			\$data .= \"\\0\\0\\0\\0\";
+		};/;
+
 			} elsif ($table_type->{type} eq 'struct') {
-				$code .= "
-	do {
-		my \@struct_objects = \$self->$field->{name}->serialize_data;
-		my \$root_object = shift \@struct_objects;
-		\$data .= \$root_object->{data};
-		push \@objects, \@struct_objects;
-	};";
-				warn "struct length not defined for $table_type->{name}" unless defined $table_type->{struct_length};
-				$offset += $table_type->{struct_length} - 4;
+				$code .= qq/do {
+			my (\$root_object, \@struct_objects) = \$self->$field->{name}->serialize_data;
+			push \@objects, \@struct_objects;
+			push \@reloc, map { \$_->{offset} += length (\$data); \$_ } \@{\$root_object->{reloc}};
+			\$data .= \$root_object->{data};
+		};/;
+
 			} else {
 				...
 			}
 		}
-		$offset += $field->{length};
 	}
 
 	# end of serialize_data
@@ -1006,10 +1086,8 @@ sub serialize_data {
 	# pad to 4 byte boundary
 	$data .= pack "x" x (4 - (length ($data) % 4)) if length ($data) % 4;
 
-	$data_object->{data} = $data;
-	$data_object->{reloc} = \@reloc;
 	# return struct data and other objects that we\'ve created
-	return $data_object, @objects
+	return { type => "struct", data => $data, reloc => \@reloc }, @objects
 }
 	';
 
@@ -1035,6 +1113,40 @@ sub serialize_string {
 
 	return { type => "string", data => $data }
 }
+
+sub serialize_array {
+	my ($self, $array_type, $array) = @_;
+
+	$array_type = $self->strip_array_brackets($array_type);
+	my $data = pack "L<", scalar @$array;
+	my @array_objects;
+	my @reloc;
+
+	if (exists $basic_types{$array_type}) {
+		$data .= join "", map { pack $basic_types{$array_type}{format}, $_ } @$array;
+
+	} elsif ($array_type eq "string") {
+		$data .= "\0\0\0\0" x @$array;
+		for my $i (0 .. $#$array) {
+			my $string_object = $self->serialize_string($array->[$i]);
+			push @array_objects, $string_object;
+			push @reloc, { offset => 4 + $i * 4, item => $string_object, type => "unsigned delta" };
+		}
+	} elsif ($self->is_array_type($array_type)) {
+		$data .= "\0\0\0\0" x @$array;
+		for my $i (0 .. $#$array) {
+			my ($array_object, @child_array_objects) = $self->serialize_array($array_type, $array->[$i]);
+			push @array_objects, $array_object, @child_array_objects;
+			push @reloc, { offset => 4 + $i * 4, item => $array_object, type => "unsigned delta" };
+		}
+
+	} else {
+		...
+	}
+
+	return { type => "array", data => $data, reloc => \@reloc }, @array_objects
+}
+
 ';
 
 

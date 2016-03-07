@@ -1,0 +1,12 @@
+
+namespace Test1;
+
+table TableInAVector {
+	val : int;
+}
+
+table TableyVector {
+	vec : [TableInAVector];
+}
+
+root_type TableyVector;

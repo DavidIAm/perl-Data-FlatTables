@@ -1,0 +1,15 @@
+
+namespace Test1;
+
+struct ArraeStruct {
+	keys : [int];
+	vals : [[string]];
+}
+
+table TableWithArraeStruct {
+	id : byte;
+	struct : ArraeStruct;
+	padding : int;
+}
+
+root_type TableWithArraeStruct;

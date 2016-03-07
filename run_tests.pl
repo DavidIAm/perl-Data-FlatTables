@@ -13,7 +13,7 @@ use FlatBuffers;
 
 # bool values cannot be tested properly because the JSON package decodes boolean as strings instead of 0/1
 # 0 integer values are mostly incompatible with flatbuffers because flatbuffers for some reason just skips the fields 0 value when serializing
-# flatbuffers forbids anything but scalars and struct fields
+# flatbuffers forbids anything but scalars and struct fields inside structs
 # flatbuffers doesnt support nested arrays
 
 
@@ -378,5 +378,46 @@ test_perl_to_perl('Test1::VectorVectorsTable' => 'fbs/vector_vectors.fbs', { mor
 # 	[ [], [], [], [], [], [], [] ],
 # ], stringvals => [ [qw/ apple bannana cherry /], ['a' .. 'c'], [qw/ int int int int /] ] });
 
+test_perl_to_perl('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { id => 5, struct => {
+	keys => [5, 9, 13, 17],
+	vals => [ [qw/ apple bannana cherry /], ['a' .. 'c'], [qw/ int int int int /] ],
+}, padding => 15});
+test_perl_to_perl('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { struct => {
+	keys => [],
+	vals => [ [], [], [], [] ],
+},});
+test_perl_to_perl('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { struct => {
+	keys => [1 .. 1000],
+	vals => [],
+},});
+test_perl_to_perl('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { id => 101 });
 
+# # no testing of array_struct.fbs with flatbuffers because flatbuffers doesn't support arrays inside structs
+# test_perl_to_flatbuffers('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { id => 5, struct => {
+# 	keys => [5, 9, 13, 17],
+# 	vals => [ [qw/ apple bannana cherry /], ['a' .. 'c'], [qw/ int int int int /] ],
+# }, padding => 15});
+# test_perl_to_flatbuffers('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { struct => {
+# 	keys => [],
+# 	vals => [ [], [], [], [] ],
+# },});
+# test_perl_to_flatbuffers('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { struct => {
+# 	keys => [1 .. 1000],
+# 	vals => [],
+# },});
+# test_perl_to_flatbuffers('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { id => 101 });
+
+# test_flatbuffers_to_perl('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { id => 5, struct => {
+# 	keys => [5, 9, 13, 17],
+# 	vals => [ [qw/ apple bannana cherry /], ['a' .. 'c'], [qw/ int int int int /] ],
+# }, padding => 15});
+# test_flatbuffers_to_perl('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { struct => {
+# 	keys => [],
+# 	vals => [ [], [], [], [] ],
+# },});
+# test_flatbuffers_to_perl('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { struct => {
+# 	keys => [1 .. 1000],
+# 	vals => [],
+# },});
+# test_flatbuffers_to_perl('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { id => 101 });
 
