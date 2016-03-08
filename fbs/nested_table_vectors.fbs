@@ -11,4 +11,4 @@ table NestedTableyVector {
 	vec : [[NestedTableInAVector]];
 }
 
-root_type TableyVector;
+root_type NestedTableyVector;

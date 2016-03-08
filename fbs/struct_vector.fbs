@@ -1,0 +1,14 @@
+
+namespace Test1;
+
+
+struct VectorStructVal {
+	val : int;
+	val2 : int;
+}
+
+table StructVector {
+	vec : [VectorStructVal];
+}
+
+root_type StructVector;

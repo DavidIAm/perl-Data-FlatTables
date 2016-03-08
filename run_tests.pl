@@ -392,3 +392,27 @@ test_perl_to_perl('Test1::NestedTableyVector' => 'fbs/nested_table_vectors.fbs',
 # no testing with flatbuffers because flatbuffers doesnt support nested vectors
 
 
+test_perl_to_perl('Test1::StructVector' => 'fbs/struct_vector.fbs', { vec => [
+	{ val => 5, val2 => 50 }, { val => 150, val2 => 250 }, { val => 200, val2 => 400 },
+] });
+test_perl_to_perl('Test1::StructVector' => 'fbs/struct_vector.fbs', { vec => [] });
+test_perl_to_perl('Test1::StructVector' => 'fbs/struct_vector.fbs', { vec => [
+	{ val => -500, val2 => -1 },
+] });
+
+test_perl_to_flatbuffers('Test1::StructVector' => 'fbs/struct_vector.fbs', { vec => [
+	{ val => 5, val2 => 50 }, { val => 150, val2 => 250 }, { val => 200, val2 => 400 },
+] });
+test_perl_to_flatbuffers('Test1::StructVector' => 'fbs/struct_vector.fbs', { vec => [] });
+test_perl_to_flatbuffers('Test1::StructVector' => 'fbs/struct_vector.fbs', { vec => [
+	{ val => -500, val2 => -1 },
+] });
+
+test_flatbuffers_to_perl('Test1::StructVector' => 'fbs/struct_vector.fbs', { vec => [
+	{ val => 5, val2 => 50 }, { val => 150, val2 => 250 }, { val => 200, val2 => 400 },
+] });
+test_flatbuffers_to_perl('Test1::StructVector' => 'fbs/struct_vector.fbs', { vec => [] });
+test_flatbuffers_to_perl('Test1::StructVector' => 'fbs/struct_vector.fbs', { vec => [
+	{ val => -500, val2 => -1 },
+] });
+

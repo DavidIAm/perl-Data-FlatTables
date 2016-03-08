@@ -17,6 +17,8 @@ use Data::Dumper;
 # TODO:
 	# anonymous package creation
 	# source filter for transparent creation
+	# superclass creation instead of self-contained class to prevent code pollution
+	# verify that the method names that we are creating arent reserved
 	# enum support
 	# file identifier support
 	# file inclusion
@@ -523,6 +525,11 @@ sub new {
 }
 ';
 
+	# type definition
+	$code .= "
+sub flatbuffers_type { '$data->{type}' }
+";
+
 	# field getter/setter functions
 	for my $field (@{$data->{fields}}) {
 		$code .= "sub $field->{name} { \@_ > 1 ? \$_[0]{$field->{name}} = \$_[1] : \$_[0]{$field->{name}} }\n";
@@ -647,9 +654,18 @@ sub deserialize_array {
 			0 .. ($array_length - 1);
 	
 	} else { # if its an array of objects
-		@array = map { $array_type->deserialize($data, $offset + $_) }
-			map $_ * 4,
-			0 .. ($array_length - 1);
+		if ($array_type->flatbuffers_type eq "table") {
+			@array = map { $array_type->deserialize($data, $offset + $_) }
+				map $_ * 4,
+				0 .. ($array_length - 1);
+		} elsif ($array_type->flatbuffers_type eq "struct") {
+			my $length = $array_type->struct_length;
+			@array = map { $array_type->deserialize($data, $offset + $_) }
+				map $_ * $length,
+				0 .. ($array_length - 1);
+		} else {
+			...
+		}
 	}
 
 	return \@array
@@ -801,7 +817,9 @@ sub serialize_data {
 		\$data .= \"\\0\\0\\0\\0\";/;
 
 		} elsif ($self->is_array_type($field->{type})) {
-			$code .= qq/my (\$array_object, \@array_objects) = \$self->serialize_array('$field->{type}', \$self->$field->{name});
+			my $type = $field->{type};
+			$type = $self->translate_object_type($type) if $self->is_object_array_type($type);
+			$code .= qq/my (\$array_object, \@array_objects) = \$self->serialize_array('$type', \$self->$field->{name});
 		push \@objects, \$array_object, \@array_objects;
 		push \@reloc, { offset => length (\$data), item => \$array_object, type => 'unsigned delta'};
 		\$data .= \"\\0\\0\\0\\0\";/;
@@ -883,11 +901,23 @@ sub serialize_array {
 		}
 
 	} else { # else an array of objects
-		$data .= "\0\0\0\0" x @$array;
-		for my $i (0 .. $#$array) {
-			my ($root_object, @table_objects) = $array->[$i]->serialize_data;
-			push @array_objects, $root_object, @table_objects;
-			push @reloc, { offset => 4 + $i * 4, item => $root_object, type => "unsigned delta" };
+		if ($array_type->flatbuffers_type eq "table") {
+			$data .= "\0\0\0\0" x @$array;
+			for my $i (0 .. $#$array) {
+				my ($root_object, @table_objects) = $array->[$i]->serialize_data;
+				push @array_objects, $root_object, @table_objects;
+				push @reloc, { offset => 4 + $i * 4, item => $root_object, type => "unsigned delta" };
+			}
+		} elsif ($array_type->flatbuffers_type eq "struct") {
+			for my $i (0 .. $#$array) {
+				my ($root_object, @struct_objects) = $array->[$i]->serialize_data;
+				push @array_objects, @struct_objects;
+				push @reloc, map { $_->{offset} += length ($data); $_ } @{$root_object->{reloc}};
+				$data .= $root_object->{data};
+
+			}
+		} else {
+			...
 		}
 	}
 
@@ -966,6 +996,11 @@ sub new {
 	return $self;
 }
 ';
+
+	# type definition
+	$code .= "
+sub flatbuffers_type { '$data->{type}' }
+";
 
 	# field getter/setter functions
 	for my $field (@{$data->{fields}}) {
@@ -1085,9 +1120,18 @@ sub deserialize_array {
 			0 .. ($array_length - 1);
 	
 	} else { # if its an array of objects
-		@array = map { $array_type->deserialize($data, $offset + $_) }
-			map $_ * 4,
-			0 .. ($array_length - 1);
+		if ($array_type->flatbuffers_type eq "table") {
+			@array = map { $array_type->deserialize($data, $offset + $_) }
+				map $_ * 4,
+				0 .. ($array_length - 1);
+		} elsif ($array_type->flatbuffers_type eq "struct") {
+			my $length = $array_type->struct_length;
+			@array = map { $array_type->deserialize($data, $offset + $_) }
+				map $_ * $length,
+				0 .. ($array_length - 1);
+		} else {
+			...
+		}
 	}
 
 	return \@array
@@ -1127,8 +1171,10 @@ sub serialize_data {
 		};/;
 
 		} elsif ($self->is_array_type($field->{type})) {
+			my $type = $field->{type};
+			$type = $self->translate_object_type($type) if $self->is_object_array_type($type);
 			$code .= qq/do {
-			my (\$array_object, \@array_objects) = \$self->serialize_array('$field->{type}', \$self->$field->{name});
+			my (\$array_object, \@array_objects) = \$self->serialize_array('$type', \$self->$field->{name});
 			push \@objects, \$array_object, \@array_objects;
 			push \@reloc, { offset => length (\$data), item => \$array_object, type => 'unsigned delta'};
 			\$data .= \"\\0\\0\\0\\0\";
@@ -1194,6 +1240,9 @@ sub serialize_string {
 	return { type => "string", data => $data }
 }
 
+
+
+
 sub serialize_array {
 	my ($self, $array_type, $array) = @_;
 
@@ -1222,11 +1271,23 @@ sub serialize_array {
 		}
 
 	} else { # else an array of objects
-		$data .= "\0\0\0\0" x @$array;
-		for my $i (0 .. $#$array) {
-			my ($root_object, @table_objects) = $array->[$i]->serialize_data;
-			push @array_objects, $root_object, @table_objects;
-			push @reloc, { offset => 4 + $i * 4, item => $root_object, type => "unsigned delta" };
+		if ($array_type->flatbuffers_type eq "table") {
+			$data .= "\0\0\0\0" x @$array;
+			for my $i (0 .. $#$array) {
+				my ($root_object, @table_objects) = $array->[$i]->serialize_data;
+				push @array_objects, $root_object, @table_objects;
+				push @reloc, { offset => 4 + $i * 4, item => $root_object, type => "unsigned delta" };
+			}
+		} elsif ($array_type->flatbuffers_type eq "struct") {
+			for my $i (0 .. $#$array) {
+				my ($root_object, @struct_objects) = $array->[$i]->serialize_data;
+				push @array_objects, @struct_objects;
+				push @reloc, map { $_->{offset} += length ($data); $_ } @{$root_object->{reloc}};
+				$data .= $root_object->{data};
+
+			}
+		} else {
+			...
 		}
 	}
 
