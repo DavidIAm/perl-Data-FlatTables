@@ -318,7 +318,7 @@ sub calculate_struct_length {
 	for my $field (@{$struct->{fields}}) {
 		if ($self->is_basic_type($field->{type})) {
 			$length += $field->{length};
-		} elsif ($field->{type} eq 'string') {
+		} elsif ($self->is_string_type($field->{type})) {
 			$length += 4;
 		} elsif ($self->is_array_type($field->{type})) {
 			$length += 4;
@@ -423,8 +423,12 @@ sub is_basic_type {
 		short ushort
 		int uint float
 		long ulong double
-		string
 	/
+}
+
+sub is_string_type {
+	my ($self, $type) = @_;
+	return $type eq 'string'
 }
 
 sub is_array_type {
@@ -469,7 +473,7 @@ sub new {
 ';
 	# setting all fields from args
 	for my $field (@{$data->{fields}}) {
-		if ($self->is_basic_type($field->{type})) {
+		if ($self->is_basic_type($field->{type}) or $self->is_string_type($field->{type})) {
 			$code .= "\t\$self->$field->{name}(\$args{$field->{name}}) if exists \$args{$field->{name}};\n";
 		} elsif ($self->is_array_type($field->{type})) {
 			$code .= "\t\$self->$field->{name}(\$args{$field->{name}}) if exists \$args{$field->{name}};\n";
@@ -670,7 +674,7 @@ sub serialize_vtable {
 
 	# field offset serializers
 	for my $field (@{$data->{fields}}) {
-		if ($self->is_basic_type($field->{type}) or $self->is_array_type($field->{type})) {
+		if ($self->is_basic_type($field->{type}) or $self->is_string_type($field->{type}) or $self->is_array_type($field->{type})) {
 			$code .= "
 	if (defined \$self->$field->{name}) {
 		push \@data, \$offset;
@@ -879,7 +883,7 @@ sub new {
 	for my $field (@{$data->{fields}}) {
 		if ($self->is_basic_type($field->{type})) {
 			$code .= "\t\$self->$field->{name}(\$args{$field->{name}});\n";
-		} elsif ($field->{type} eq 'string') {
+		} elsif ($self->is_string_type($field->{type})) {
 			$code .= "\t\$self->$field->{name}(\$args{$field->{name}});\n";
 		} elsif ($self->is_array_type($field->{type})) {
 			$code .= "\t\$self->$field->{name}(\$args{$field->{name}});\n";
