@@ -1,0 +1,18 @@
+
+namespace Test1;
+
+
+struct StructVectorStructVal {
+	val : int;
+	val2 : int;
+}
+
+struct StructVectorStruct {
+	vec : [StructVectorStructVal];
+}
+
+table StructVectorStructContainer {
+	obj : StructVectorStruct;
+}
+
+root_type StructVectorStructContainer;
