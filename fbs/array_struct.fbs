@@ -1,9 +1,16 @@
 
 namespace Test1;
 
+
+table ItemTable {
+	key : string;
+	val : int;
+}
+
 struct ArraeStruct {
 	keys : [int];
 	vals : [[string]];
+	subtables : [ItemTable];
 }
 
 table TableWithArraeStruct {

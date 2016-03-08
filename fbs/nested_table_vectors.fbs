@@ -1,0 +1,14 @@
+
+namespace Test1;
+
+
+table NestedTableInAVector {
+	key : string;
+	val : int;
+}
+
+table NestedTableyVector {
+	vec : [[NestedTableInAVector]];
+}
+
+root_type TableyVector;

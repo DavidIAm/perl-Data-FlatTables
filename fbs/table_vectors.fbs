@@ -1,7 +1,9 @@
 
 namespace Test1;
 
+
 table TableInAVector {
+	key : string;
 	val : int;
 }
 

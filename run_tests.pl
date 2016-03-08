@@ -277,33 +277,10 @@ test_perl_to_perl('Test1::TableWithPointingStruct' => 'fbs/pointing_struct.fbs',
 });
 
 
-# # no testing of pointing_struct.fbs with flatbuffers because flatbuffers doesn't support structs with string or table values
-# test_perl_to_flatbuffers('Test1::TableWithPointingStruct' => 'fbs/pointing_struct.fbs', {
-# 	data => { name => 'name', value => 'value', child1 => {}, child2 => {} },
-# });
-# test_perl_to_flatbuffers('Test1::TableWithPointingStruct' => 'fbs/pointing_struct.fbs', {
-# 	data => { name => 'qwerty', value => 'uiop', child1 => {}, child2 => {} },
-# 	more => { name => 'test', value => 'asdf', child1 => {}, child2 => {} },
-# });
-# test_perl_to_flatbuffers('Test1::TableWithPointingStruct' => 'fbs/pointing_struct.fbs', {
-# 	data => { name => 'name', value => 'value', child1 => {
-# 		data => { name => 'wwgaerge', value => '', child1 => {}, child2 => {} }
-# 		}, child2 => {} },
-# 	more => { name => 'test', value => 'asdf', child1 => {}, child2 => {} },
-# });
-# test_flatbuffers_to_perl('Test1::TableWithPointingStruct' => 'fbs/pointing_struct.fbs', {
-# 	data => { name => 'name', value => 'value', child1 => {}, child2 => {} },
-# });
-# test_flatbuffers_to_perl('Test1::TableWithPointingStruct' => 'fbs/pointing_struct.fbs', {
-# 	data => { name => 'qwerty', value => 'uiop', child1 => {}, child2 => {} },
-# 	more => { name => 'test', value => 'asdf', child1 => {}, child2 => {} },
-# });
-# test_flatbuffers_to_perl('Test1::TableWithPointingStruct' => 'fbs/pointing_struct.fbs', {
-# 	data => { name => 'name', value => 'value', child1 => {
-# 		data => { name => 'wwgaerge', value => '', child1 => {}, child2 => {} }
-# 		}, child2 => {} },
-# 	more => { name => 'test', value => 'asdf', child1 => {}, child2 => {} },
-# });
+# no testing of pointing_struct.fbs with flatbuffers because flatbuffers doesn't support structs with string or table values
+
+
+
 
 
 
@@ -353,71 +330,65 @@ test_perl_to_perl('Test1::VectorVectorsTable' => 'fbs/vector_vectors.fbs', { mor
 	[ [], [], [], [], [], [], [] ],
 ], stringvals => [ [qw/ apple bannana cherry /], ['a' .. 'c'], [qw/ int int int int /] ] });
 
-# # no testing of fbs/vector_vectors.fbs because flatbuffers doesnt support nested arrays
-# test_perl_to_flatbuffers('Test1::VectorVectorsTable' => 'fbs/vector_vectors.fbs', { vals => [ [5, 9, 13, 17], [ 1, 5, 7], [500, 400, 300] ], });
-# test_perl_to_flatbuffers('Test1::VectorVectorsTable' => 'fbs/vector_vectors.fbs', { vals => [ [],[],[],[] ], morevals => [
-# 	[ [5, 9, 13, 17], [ 1, 5, 7], [500, 400, 300] ],
-# 	[ [1 .. 50],[400 .. 410],[100 .. 112],[] ],
-# 	[ [-50 .. -20], ],
-# ]});
-# test_perl_to_flatbuffers('Test1::VectorVectorsTable' => 'fbs/vector_vectors.fbs', { morevals => [
-# 	[ [], [], [] ],
-# 	[ [], [], [], [], [] ],
-# 	[ [], [], [], [], [], [], [] ],
-# ], stringvals => [ [qw/ apple bannana cherry /], ['a' .. 'c'], [qw/ int int int int /] ] });
+# no testing of fbs/vector_vectors.fbs because flatbuffers doesnt support nested arrays
 
-# test_flatbuffers_to_perl('Test1::VectorVectorsTable' => 'fbs/vector_vectors.fbs', { vals => [ [5, 9, 13, 17], [ 1, 5, 7], [500, 400, 300] ], });
-# test_flatbuffers_to_perl('Test1::VectorVectorsTable' => 'fbs/vector_vectors.fbs', { vals => [ [],[],[],[] ], morevals => [
-# 	[ [5, 9, 13, 17], [ 1, 5, 7], [500, 400, 300] ],
-# 	[ [1 .. 50],[400 .. 410],[100 .. 112],[] ],
-# 	[ [-50 .. -20], ],
-# ]});
-# test_flatbuffers_to_perl('Test1::VectorVectorsTable' => 'fbs/vector_vectors.fbs', { morevals => [
-# 	[ [], [], [] ],
-# 	[ [], [], [], [], [] ],
-# 	[ [], [], [], [], [], [], [] ],
-# ], stringvals => [ [qw/ apple bannana cherry /], ['a' .. 'c'], [qw/ int int int int /] ] });
+
+
 
 test_perl_to_perl('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { id => 5, struct => {
 	keys => [5, 9, 13, 17],
 	vals => [ [qw/ apple bannana cherry /], ['a' .. 'c'], [qw/ int int int int /] ],
+	subtables => [{ key => 'test', val => 1515 }, { key => 'a', val => 1313 },  { val => -1 },  {}, { key => '300000000000000000' }, ],
 }, padding => 15});
 test_perl_to_perl('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { struct => {
 	keys => [],
 	vals => [ [], [], [], [] ],
+	subtables => [],
 },});
 test_perl_to_perl('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { struct => {
 	keys => [1 .. 1000],
 	vals => [],
+	subtables => [ { key => 'key', val => 41414141 }, ],
 },});
 test_perl_to_perl('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { id => 101 });
 
-# # no testing of array_struct.fbs with flatbuffers because flatbuffers doesn't support arrays inside structs
-# test_perl_to_flatbuffers('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { id => 5, struct => {
-# 	keys => [5, 9, 13, 17],
-# 	vals => [ [qw/ apple bannana cherry /], ['a' .. 'c'], [qw/ int int int int /] ],
-# }, padding => 15});
-# test_perl_to_flatbuffers('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { struct => {
-# 	keys => [],
-# 	vals => [ [], [], [], [] ],
-# },});
-# test_perl_to_flatbuffers('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { struct => {
-# 	keys => [1 .. 1000],
-# 	vals => [],
-# },});
-# test_perl_to_flatbuffers('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { id => 101 });
+# no testing of array_struct.fbs with flatbuffers because flatbuffers doesn't support arrays inside structs
 
-# test_flatbuffers_to_perl('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { id => 5, struct => {
-# 	keys => [5, 9, 13, 17],
-# 	vals => [ [qw/ apple bannana cherry /], ['a' .. 'c'], [qw/ int int int int /] ],
-# }, padding => 15});
-# test_flatbuffers_to_perl('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { struct => {
-# 	keys => [],
-# 	vals => [ [], [], [], [] ],
-# },});
-# test_flatbuffers_to_perl('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { struct => {
-# 	keys => [1 .. 1000],
-# 	vals => [],
-# },});
-# test_flatbuffers_to_perl('Test1::TableWithArraeStruct' => 'fbs/array_struct.fbs', { id => 101 });
+
+
+
+
+test_perl_to_perl('Test1::TableyVector' => 'fbs/table_vectors.fbs', { vec => [
+	{ key => 'asdf', val => 1 }, { key => '', val => 3 }, { val => 5 }, { key => 'really long' x 5, val => 17 }, { val => -19 },
+] });
+test_perl_to_perl('Test1::TableyVector' => 'fbs/table_vectors.fbs', { vec => [] });
+test_perl_to_perl('Test1::TableyVector' => 'fbs/table_vectors.fbs', {});
+test_perl_to_perl('Test1::TableyVector' => 'fbs/table_vectors.fbs', { vec => [
+	{}, {}, { key => 'key' }, {}, { val => 15 }
+] });
+
+test_perl_to_flatbuffers('Test1::TableyVector' => 'fbs/table_vectors.fbs', { vec => [
+	{ key => 'asdf', val => 1 }, { key => '', val => 3 }, { val => 5 }, { key => 'really long' x 5, val => 17 }, { val => -19 },
+] });
+test_perl_to_flatbuffers('Test1::TableyVector' => 'fbs/table_vectors.fbs', { vec => [] });
+test_perl_to_flatbuffers('Test1::TableyVector' => 'fbs/table_vectors.fbs', {});
+test_perl_to_flatbuffers('Test1::TableyVector' => 'fbs/table_vectors.fbs', { vec => [
+	{}, {}, { key => 'key' }, {}, { val => 15 }
+] });
+test_flatbuffers_to_perl('Test1::TableyVector' => 'fbs/table_vectors.fbs', { vec => [
+	{ key => 'asdf', val => 1 }, { key => '', val => 3 }, { val => 5 }, { key => 'really long' x 5, val => 17 }, { val => -19 },
+] });
+test_flatbuffers_to_perl('Test1::TableyVector' => 'fbs/table_vectors.fbs', { vec => [] });
+test_flatbuffers_to_perl('Test1::TableyVector' => 'fbs/table_vectors.fbs', {});
+test_flatbuffers_to_perl('Test1::TableyVector' => 'fbs/table_vectors.fbs', { vec => [
+	{}, {}, { key => 'key' }, {}, { val => 15 }
+] });
+
+
+
+test_perl_to_perl('Test1::NestedTableyVector' => 'fbs/nested_table_vectors.fbs', { vec => [
+	[], [{ val => 1 }, { val => 3 },], [{}, {}], [{ val => 5 }, { val => 16 }, { val => 0 },]
+] });
+# no testing with flatbuffers because flatbuffers doesnt support nested vectors
+
 

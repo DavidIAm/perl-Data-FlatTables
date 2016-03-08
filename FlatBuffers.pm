@@ -21,7 +21,8 @@ use Data::Dumper;
 	# file identifier support
 	# file inclusion
 	# vector support
-
+	# more complex namespace handling
+	# use statements in compiled and written files
 
 
 
@@ -489,7 +490,26 @@ sub new {
 		if ($self->is_basic_type($field->{type}) or $self->is_string_type($field->{type})) {
 			$code .= "\t\$self->$field->{name}(\$args{$field->{name}}) if exists \$args{$field->{name}};\n";
 		} elsif ($self->is_array_type($field->{type})) {
-			$code .= "\t\$self->$field->{name}(\$args{$field->{name}}) if exists \$args{$field->{name}};\n";
+			if ($self->is_object_array_type($field->{type})) {
+				my $type = $self->translate_object_type($field->{type});
+
+				... unless $type =~ /\A(\[+)/;
+				my $nest_levels = length $1;
+
+				my $true_type = $type;
+				$true_type = $self->strip_array_brackets($true_type) for 1 .. $nest_levels;
+
+				$code .= "\t\$self->$field->{name}(\n";
+				$code .= "\t\t". "[ map { " x $nest_levels;
+
+				$code .= "\n\t\t\t$true_type->new(\%\$_)\n";
+
+				$code .= "\t\t". " } \@\$_ ] " x ($nest_levels - 1);
+				$code .= "} \@{\$args{$field->{name}}} ]\n\t) if exists \$args{$field->{name}};\n";
+
+			} else {
+				$code .= "\t\$self->$field->{name}(\$args{$field->{name}}) if exists \$args{$field->{name}};\n";
+			}
 		} else {
 			my $table_type = $self->get_object_type($field->{type});
 			my $typename = $table_type->{typename};
@@ -538,7 +558,13 @@ sub deserialize {
 			$code .= "\$self->$field->{name}(\$self->deserialize_string(\$data, \$object_offset + \$offset));";
 
 		} elsif ($self->is_array_type($field->{type})) {
-			$code .= "\$self->$field->{name}(\$self->deserialize_array('$field->{type}', \$data, \$object_offset + \$offset));";
+			if ($self->is_object_array_type($field->{type})) {
+				# deserializing an object array requires the actual typename in order to call on the required package
+				my $type = $self->translate_object_type($field->{type});
+				$code .= "\$self->$field->{name}(\$self->deserialize_array('$type', \$data, \$object_offset + \$offset));";
+			} else {
+				$code .= "\$self->$field->{name}(\$self->deserialize_array('$field->{type}', \$data, \$object_offset + \$offset));";
+			}
 
 		} else {
 			my $table_type = $self->get_object_type($field->{type});
@@ -620,8 +646,10 @@ sub deserialize_array {
 			map $_ * 4,
 			0 .. ($array_length - 1);
 	
-	} else {
-		...
+	} else { # if its an array of objects
+		@array = map { $array_type->deserialize($data, $offset + $_) }
+			map $_ * 4,
+			0 .. ($array_length - 1);
 	}
 
 	return \@array
@@ -780,7 +808,7 @@ sub serialize_data {
 
 		} else { # table serialization
 			my $table_type = $self->get_object_type($field->{type});
-			# my $typename = $table_type->{typename};
+			
 			if ($table_type->{type} eq 'table') {
 				$code .= qq/my (\$root_object, \@table_objects) = \$self->$field->{name}->serialize_data;
 		push \@objects, \$root_object, \@table_objects;
@@ -831,21 +859,22 @@ sub serialize_array {
 	my ($self, $array_type, $array) = @_;
 
 	$array_type = $self->strip_array_brackets($array_type);
+
 	my $data = pack "L<", scalar @$array;
 	my @array_objects;
 	my @reloc;
 
-	if (exists $basic_types{$array_type}) {
+	if (exists $basic_types{$array_type}) { # array of scalar values
 		$data .= join "", map { pack $basic_types{$array_type}{format}, $_ } @$array;
 
-	} elsif ($array_type eq "string") {
+	} elsif ($array_type eq "string") { # array of strings
 		$data .= "\0\0\0\0" x @$array;
 		for my $i (0 .. $#$array) {
 			my $string_object = $self->serialize_string($array->[$i]);
 			push @array_objects, $string_object;
 			push @reloc, { offset => 4 + $i * 4, item => $string_object, type => "unsigned delta" };
 		}
-	} elsif ($self->is_array_type($array_type)) {
+	} elsif ($self->is_array_type($array_type)) { # array of arrays
 		$data .= "\0\0\0\0" x @$array;
 		for my $i (0 .. $#$array) {
 			my ($array_object, @child_array_objects) = $self->serialize_array($array_type, $array->[$i]);
@@ -853,8 +882,13 @@ sub serialize_array {
 			push @reloc, { offset => 4 + $i * 4, item => $array_object, type => "unsigned delta" };
 		}
 
-	} else {
-		...
+	} else { # else an array of objects
+		$data .= "\0\0\0\0" x @$array;
+		for my $i (0 .. $#$array) {
+			my ($root_object, @table_objects) = $array->[$i]->serialize_data;
+			push @array_objects, $root_object, @table_objects;
+			push @reloc, { offset => 4 + $i * 4, item => $root_object, type => "unsigned delta" };
+		}
 	}
 
 	return { type => "array", data => $data, reloc => \@reloc }, @array_objects
@@ -899,7 +933,27 @@ sub new {
 		} elsif ($self->is_string_type($field->{type})) {
 			$code .= "\t\$self->$field->{name}(\$args{$field->{name}});\n";
 		} elsif ($self->is_array_type($field->{type})) {
-			$code .= "\t\$self->$field->{name}(\$args{$field->{name}});\n";
+			# $code .= "\t\$self->$field->{name}(\$args{$field->{name}});\n";
+			if ($self->is_object_array_type($field->{type})) {
+				my $type = $self->translate_object_type($field->{type});
+
+				... unless $type =~ /\A(\[+)/;
+				my $nest_levels = length $1;
+
+				my $true_type = $type;
+				$true_type = $self->strip_array_brackets($true_type) for 1 .. $nest_levels;
+
+				$code .= "\t\$self->$field->{name}(\n";
+				$code .= "\t\t". "[ map { " x $nest_levels;
+
+				$code .= "\n\t\t\t$true_type->new(\%\$_)\n";
+
+				$code .= "\t\t". " } \@\$_ ] " x ($nest_levels - 1);
+				$code .= "} \@{\$args{$field->{name}}} ]\n\t);\n";
+
+			} else {
+				$code .= "\t\$self->$field->{name}(\$args{$field->{name}});\n";
+			}
 		} else {
 			my $table_type = $self->get_object_type($field->{type});
 			my $typename = $table_type->{typename};
@@ -943,7 +997,14 @@ sub deserialize {
 		} elsif ($self->is_string_type($field->{type})) {
 			$code .= "\$self->$field->{name}(\$self->deserialize_string(\$data, \$offset + $offset));";
 		} elsif ($self->is_array_type($field->{type})) {
-			$code .= "\$self->$field->{name}(\$self->deserialize_array('$field->{type}', \$data, \$offset + $offset));";
+			if ($self->is_object_array_type($field->{type})) {
+				# deserializing an object array requires the actual typename in order to call on the required package
+				my $type = $self->translate_object_type($field->{type});
+				$code .= "\$self->$field->{name}(\$self->deserialize_array('$type', \$data, \$offset + $offset));";
+			} else {
+				$code .= "\$self->$field->{name}(\$self->deserialize_array('$field->{type}', \$data, \$offset + $offset));";
+			}
+			# $code .= "\$self->$field->{name}(\$self->deserialize_array('$field->{type}', \$data, \$offset + $offset));";
 
 		} else {
 			my $table_type = $self->get_object_type($field->{type});
@@ -1023,8 +1084,10 @@ sub deserialize_array {
 			map $_ * 4,
 			0 .. ($array_length - 1);
 	
-	} else {
-		...
+	} else { # if its an array of objects
+		@array = map { $array_type->deserialize($data, $offset + $_) }
+			map $_ * 4,
+			0 .. ($array_length - 1);
 	}
 
 	return \@array
@@ -1073,7 +1136,7 @@ sub serialize_data {
 
 		} else { # table serialization
 			my $table_type = $self->get_object_type($field->{type});
-			# my $typename = $table_type->{typename};
+			
 			if ($table_type->{type} eq 'table') {
 				$code .= qq/do {
 			my (\$root_object, \@table_objects) = \$self->$field->{name}->serialize_data;
@@ -1135,21 +1198,22 @@ sub serialize_array {
 	my ($self, $array_type, $array) = @_;
 
 	$array_type = $self->strip_array_brackets($array_type);
+
 	my $data = pack "L<", scalar @$array;
 	my @array_objects;
 	my @reloc;
 
-	if (exists $basic_types{$array_type}) {
+	if (exists $basic_types{$array_type}) { # array of scalar values
 		$data .= join "", map { pack $basic_types{$array_type}{format}, $_ } @$array;
 
-	} elsif ($array_type eq "string") {
+	} elsif ($array_type eq "string") { # array of strings
 		$data .= "\0\0\0\0" x @$array;
 		for my $i (0 .. $#$array) {
 			my $string_object = $self->serialize_string($array->[$i]);
 			push @array_objects, $string_object;
 			push @reloc, { offset => 4 + $i * 4, item => $string_object, type => "unsigned delta" };
 		}
-	} elsif ($self->is_array_type($array_type)) {
+	} elsif ($self->is_array_type($array_type)) { # array of arrays
 		$data .= "\0\0\0\0" x @$array;
 		for my $i (0 .. $#$array) {
 			my ($array_object, @child_array_objects) = $self->serialize_array($array_type, $array->[$i]);
@@ -1157,13 +1221,17 @@ sub serialize_array {
 			push @reloc, { offset => 4 + $i * 4, item => $array_object, type => "unsigned delta" };
 		}
 
-	} else {
-		...
+	} else { # else an array of objects
+		$data .= "\0\0\0\0" x @$array;
+		for my $i (0 .. $#$array) {
+			my ($root_object, @table_objects) = $array->[$i]->serialize_data;
+			push @array_objects, $root_object, @table_objects;
+			push @reloc, { offset => 4 + $i * 4, item => $root_object, type => "unsigned delta" };
+		}
 	}
 
 	return { type => "array", data => $data, reloc => \@reloc }, @array_objects
 }
-
 ';
 
 
