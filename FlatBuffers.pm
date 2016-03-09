@@ -319,14 +319,15 @@ sub calculate_struct_length {
 
 	my $length = 0;
 	for my $field (@{$struct->{fields}}) {
-		if ($self->is_basic_type($field->{type})) {
+		my $type = $field->{type};
+		if ($self->is_basic_type($type)) {
 			$length += $field->{length};
-		} elsif ($self->is_string_type($field->{type})) {
+		} elsif ($self->is_string_type($type)) {
 			$length += 4;
-		} elsif ($self->is_array_type($field->{type})) {
+		} elsif ($self->is_array_type($type)) {
 			$length += 4;
 		} else {
-			my $table_type = $self->get_object_type($field->{type});
+			my $table_type = $self->get_object_type($type);
 			if ($table_type->{type} eq 'table') {
 				$length += 4;
 			} elsif ($table_type->{type} eq 'struct') {
@@ -489,11 +490,12 @@ sub new {
 ';
 	# setting all fields from args
 	for my $field (@{$data->{fields}}) {
-		if ($self->is_basic_type($field->{type}) or $self->is_string_type($field->{type})) {
+		my $type = $field->{type};
+		if ($self->is_basic_type($type) or $self->is_string_type($type)) {
 			$code .= "\t\$self->$field->{name}(\$args{$field->{name}}) if exists \$args{$field->{name}};\n";
-		} elsif ($self->is_array_type($field->{type})) {
-			if ($self->is_object_array_type($field->{type})) {
-				my $type = $self->translate_object_type($field->{type});
+		} elsif ($self->is_array_type($type)) {
+			if ($self->is_object_array_type($type)) {
+				$type = $self->translate_object_type($type);
 
 				... unless $type =~ /\A(\[+)/;
 				my $nest_levels = length $1;
@@ -513,7 +515,7 @@ sub new {
 				$code .= "\t\$self->$field->{name}(\$args{$field->{name}}) if exists \$args{$field->{name}};\n";
 			}
 		} else {
-			my $table_type = $self->get_object_type($field->{type});
+			my $table_type = $self->get_object_type($type);
 			my $typename = $table_type->{typename};
 			$code .= "\t\$self->$field->{name}($typename->new(%{\$args{$field->{name}}})) if exists \$args{$field->{name}};\n";
 		}
@@ -557,24 +559,20 @@ sub deserialize {
 	\$offset = unpack 'S<', substr \$data, \$vtable_offset + $vtable_iterator, 2;
 	if (\$offset != 0) {
 		";
-		if ($self->is_basic_type($field->{type})) {
-			my $type = $flatbuffers_basic_types{$field->{type}};
+		my $type = $field->{type};
+		if ($self->is_basic_type($type)) {
+			my $type = $flatbuffers_basic_types{$type};
 			$code .= "\$self->$field->{name}(unpack '$type->{format}', substr \$data, \$object_offset + \$offset, $type->{length});";
 
-		} elsif ($self->is_string_type($field->{type})) {
+		} elsif ($self->is_string_type($type)) {
 			$code .= "\$self->$field->{name}(\$self->deserialize_string(\$data, \$object_offset + \$offset));";
 
-		} elsif ($self->is_array_type($field->{type})) {
-			if ($self->is_object_array_type($field->{type})) {
-				# deserializing an object array requires the actual typename in order to call on the required package
-				my $type = $self->translate_object_type($field->{type});
-				$code .= "\$self->$field->{name}(\$self->deserialize_array('$type', \$data, \$object_offset + \$offset));";
-			} else {
-				$code .= "\$self->$field->{name}(\$self->deserialize_array('$field->{type}', \$data, \$object_offset + \$offset));";
-			}
+		} elsif ($self->is_array_type($type)) {
+			$type = $self->translate_object_type($type) if $self->is_object_array_type($type);
+			$code .= "\$self->$field->{name}(\$self->deserialize_array('$type', \$data, \$object_offset + \$offset));";
 
 		} else {
-			my $table_type = $self->get_object_type($field->{type});
+			my $table_type = $self->get_object_type($type);
 			my $typename = $table_type->{typename};
 			$code .= "\$self->$field->{name}($typename->deserialize(\$data, \$object_offset + \$offset));";
 		}
@@ -731,7 +729,8 @@ sub serialize_vtable {
 
 	# field offset serializers
 	for my $field (@{$data->{fields}}) {
-		if ($self->is_basic_type($field->{type}) or $self->is_string_type($field->{type}) or $self->is_array_type($field->{type})) {
+		my $type = $field->{type};
+		if ($self->is_basic_type($type) or $self->is_string_type($type) or $self->is_array_type($type)) {
 			$code .= "
 	if (defined \$self->$field->{name}) {
 		push \@data, \$offset;
@@ -741,7 +740,7 @@ sub serialize_vtable {
 	}
 ";
 		} else {
-			my $table_type = $self->get_object_type($field->{type});
+			my $table_type = $self->get_object_type($type);
 			if ($table_type->{type} eq 'table') {
 			$code .= "
 	if (defined \$self->$field->{name}) {
@@ -807,17 +806,18 @@ sub serialize_data {
 		$code .= "
 	if (defined \$self->$field->{name}) {
 		";
-		if ($self->is_basic_type($field->{type})) {
-			$code .= "\$data .= pack '$flatbuffers_basic_types{$field->{type}}{format}', \$self->$field->{name};";
+		my $type = $field->{type};
+		if ($self->is_basic_type($type)) {
+			$code .= "\$data .= pack '$flatbuffers_basic_types{$type}{format}', \$self->$field->{name};";
 
-		} elsif ($self->is_string_type($field->{type})) {
+		} elsif ($self->is_string_type($type)) {
 			$code .= qq/my \$string_object = \$self->serialize_string(\$self->$field->{name});
 		push \@objects, \$string_object;
 		push \@reloc, { offset => length (\$data), item => \$string_object, type => 'unsigned delta'};
 		\$data .= \"\\0\\0\\0\\0\";/;
 
-		} elsif ($self->is_array_type($field->{type})) {
-			my $type = $field->{type};
+		} elsif ($self->is_array_type($type)) {
+			my $type = $type;
 			$type = $self->translate_object_type($type) if $self->is_object_array_type($type);
 			$code .= qq/my (\$array_object, \@array_objects) = \$self->serialize_array('$type', \$self->$field->{name});
 		push \@objects, \$array_object, \@array_objects;
@@ -825,7 +825,7 @@ sub serialize_data {
 		\$data .= \"\\0\\0\\0\\0\";/;
 
 		} else { # table serialization
-			my $table_type = $self->get_object_type($field->{type});
+			my $table_type = $self->get_object_type($type);
 			
 			if ($table_type->{type} eq 'table') {
 				$code .= qq/my (\$root_object, \@table_objects) = \$self->$field->{name}->serialize_data;
@@ -958,14 +958,15 @@ sub new {
 ';
 	# setting all fields from args
 	for my $field (@{$data->{fields}}) {
-		if ($self->is_basic_type($field->{type})) {
+		my $type = $field->{type};
+		if ($self->is_basic_type($type)) {
 			$code .= "\t\$self->$field->{name}(\$args{$field->{name}});\n";
-		} elsif ($self->is_string_type($field->{type})) {
+		} elsif ($self->is_string_type($type)) {
 			$code .= "\t\$self->$field->{name}(\$args{$field->{name}});\n";
-		} elsif ($self->is_array_type($field->{type})) {
+		} elsif ($self->is_array_type($type)) {
 			# $code .= "\t\$self->$field->{name}(\$args{$field->{name}});\n";
-			if ($self->is_object_array_type($field->{type})) {
-				my $type = $self->translate_object_type($field->{type});
+			if ($self->is_object_array_type($type)) {
+				my $type = $self->translate_object_type($type);
 
 				... unless $type =~ /\A(\[+)/;
 				my $nest_levels = length $1;
@@ -985,7 +986,7 @@ sub new {
 				$code .= "\t\$self->$field->{name}(\$args{$field->{name}});\n";
 			}
 		} else {
-			my $table_type = $self->get_object_type($field->{type});
+			my $table_type = $self->get_object_type($type);
 			my $typename = $table_type->{typename};
 			$code .= "\t\$self->$field->{name}($typename->new(%{\$args{$field->{name}}}));\n";
 		}
@@ -1025,24 +1026,19 @@ sub deserialize {
 	for my $field (@{$data->{fields}}) {
 		$code .= "
 	";
-		if ($self->is_basic_type($field->{type})) {
-			my $type = $flatbuffers_basic_types{$field->{type}};
+		my $type = $field->{type};
+		if ($self->is_basic_type($type)) {
+			my $type = $flatbuffers_basic_types{$type};
 			$code .= "\$self->$field->{name}(unpack '$type->{format}', substr \$data, \$offset + $offset, $type->{length});";
 
-		} elsif ($self->is_string_type($field->{type})) {
+		} elsif ($self->is_string_type($type)) {
 			$code .= "\$self->$field->{name}(\$self->deserialize_string(\$data, \$offset + $offset));";
-		} elsif ($self->is_array_type($field->{type})) {
-			if ($self->is_object_array_type($field->{type})) {
-				# deserializing an object array requires the actual typename in order to call on the required package
-				my $type = $self->translate_object_type($field->{type});
-				$code .= "\$self->$field->{name}(\$self->deserialize_array('$type', \$data, \$offset + $offset));";
-			} else {
-				$code .= "\$self->$field->{name}(\$self->deserialize_array('$field->{type}', \$data, \$offset + $offset));";
-			}
-			# $code .= "\$self->$field->{name}(\$self->deserialize_array('$field->{type}', \$data, \$offset + $offset));";
+		} elsif ($self->is_array_type($type)) {
+			$type = $self->translate_object_type($type) if $self->is_object_array_type($type);
+			$code .= "\$self->$field->{name}(\$self->deserialize_array('$type', \$data, \$offset + $offset));";
 
 		} else {
-			my $table_type = $self->get_object_type($field->{type});
+			my $table_type = $self->get_object_type($type);
 			my $typename = $table_type->{typename};
 			$code .= "\$self->$field->{name}($typename->deserialize(\$data, \$offset + $offset));";
 			$offset += $table_type->{struct_length} - 4 if $table_type->{type} eq 'struct';
@@ -1158,11 +1154,12 @@ sub serialize_data {
 	for my $field (@{$data->{fields}}) {
 		$code .= "
 	";
-		if ($self->is_basic_type($field->{type})) {
-			my $type = $flatbuffers_basic_types{$field->{type}};
+		my $type = $field->{type};
+		if ($self->is_basic_type($type)) {
+			my $type = $flatbuffers_basic_types{$type};
 			$code .= "\$data .= pack '$type->{format}', \$self->$field->{name} // die 'struct $data->{typename} requires field $field->{name}';";
 
-		} elsif ($self->is_string_type($field->{type})) {
+		} elsif ($self->is_string_type($type)) {
 			$code .= qq/do {
 			my \$string_object = \$self->serialize_string(\$self->$field->{name});
 			push \@objects, \$string_object;
@@ -1170,8 +1167,7 @@ sub serialize_data {
 			\$data .= \"\\0\\0\\0\\0\";
 		};/;
 
-		} elsif ($self->is_array_type($field->{type})) {
-			my $type = $field->{type};
+		} elsif ($self->is_array_type($type)) {
 			$type = $self->translate_object_type($type) if $self->is_object_array_type($type);
 			$code .= qq/do {
 			my (\$array_object, \@array_objects) = \$self->serialize_array('$type', \$self->$field->{name});
@@ -1181,7 +1177,7 @@ sub serialize_data {
 		};/;
 
 		} else { # table serialization
-			my $table_type = $self->get_object_type($field->{type});
+			my $table_type = $self->get_object_type($type);
 			
 			if ($table_type->{type} eq 'table') {
 				$code .= qq/do {
