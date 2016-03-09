@@ -424,3 +424,7 @@ test_perl_to_perl('fbs/struct_vector_struct.fbs' => { obj => { vec => [
 ] }, });
 # flatbuffers doesn't support vectors inside structs
 
+
+test_perl_to_perl('fbs/identifier.fbs' => { val => 15 });
+test_perl_to_flatbuffers('fbs/identifier.fbs' => { val => 15 });
+test_flatbuffers_to_perl('fbs/identifier.fbs' => { val => 15 });

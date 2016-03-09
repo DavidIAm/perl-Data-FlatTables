@@ -1,0 +1,11 @@
+
+namespace Test1;
+
+table IdentifierTestTable {
+	val : int;
+	val2 : int;
+}
+
+file_identifier "TST1";
+
+root_type IdentifierTestTable;

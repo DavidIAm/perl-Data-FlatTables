@@ -20,9 +20,7 @@ use Data::Dumper;
 	# superclass creation instead of self-contained class to prevent code pollution
 	# verify that the method names that we are creating arent reserved
 	# enum support
-	# file identifier support
 	# file inclusion
-	# vector support
 	# more complex namespace handling
 	# use statements in compiled and written files
 
@@ -40,11 +38,11 @@ use Data::Dumper;
 sub load {
 	my ($self, $filepath) = @_;
 	my $parser = FlatBuffers->new;
-	my ($root_type, $compiled) = $parser->compile_file($filepath);
+	my $compiled = $parser->compile_file($filepath);
 
-	$parser->load_perl_packages($compiled);
+	$parser->load_perl_packages($compiled->{compiled_types});
 
-	return $root_type
+	return $compiled->{root_type}
 }
 
 
@@ -54,10 +52,10 @@ sub load {
 sub create_packages {
 	my ($self, $filepath) = @_;
 	my $parser = FlatBuffers->new;
-	my ($root_type, $compiled) = $parser->compile_file($filepath);
+	my $compiled = $parser->compile_file($filepath);
 
-	$parser->create_perl_packages($compiled);
-	return $root_type
+	$parser->create_perl_packages($compiled->{compiled_types});
+	return $compiled->{root_type}
 }
 
 
@@ -348,11 +346,35 @@ sub compile {
 	my ($self, $code) = @_;
 
 	# my $current_namespace;
-	my $root_type;
+	my $compiler_state = {
+		root_type => undef,
+		file_identifier => undef,
+	};
 
 	my %parsed_types;
 
-	# parse statements
+	# # first pass to collect key data
+	# for my $statement (@$code) {
+	# 	if ($statement->{type} eq 'namespace_decl') {
+	# 		# set a new current namespace
+	# 		$self->current_namespace($statement->{name} =~ s/\./::/gr);
+
+	# 	} elsif ($statement->{type} eq 'file_identifier_decl') {
+	# 		# set a new current namespace
+	# 		$compiler_state->{file_identifier} = $statement->{name};
+
+	# 	} elsif ($statement->{type} eq 'root_decl') {
+	# 		# set the root object type
+	# 		my $typename = $statement->{name};
+	# 		$typename = $self->current_namespace ."::$typename" if defined $self->current_namespace;
+	# 		$typename = $self->toplevel_namespace . "::$typename" if defined $self->toplevel_namespace;
+
+	# 		die "error: multiple root type declarations: '$compiler_state->{root_type}' and $typename" if defined $compiler_state->{root_type};
+	# 		$compiler_state->{root_type} = $typename;
+	# 	}
+	# }
+
+	# second pass to collect table types
 	for my $statement (@$code) {
 		if ($statement->{type} eq 'namespace_decl') {
 			# set a new current namespace
@@ -367,14 +389,19 @@ sub compile {
 			$statement->{struct}{typename} = $typename;
 			$parsed_types{$statement->{struct}{name}} = $statement->{struct};
 
+		} elsif ($statement->{type} eq 'file_identifier_decl') {
+			# set a new current namespace
+			die "file identifier must be 4 characters long" unless 4 == length $statement->{name};
+			$compiler_state->{file_identifier} = $statement->{name};
+
 		} elsif ($statement->{type} eq 'root_decl') {
 			# set the root object type
 			my $typename = $statement->{name};
 			$typename = $self->current_namespace ."::$typename" if defined $self->current_namespace;
 			$typename = $self->toplevel_namespace . "::$typename" if defined $self->toplevel_namespace;
 
-			die "error: multiple root type declarations: '$root_type' and $typename" if defined $root_type;
-			$root_type = $typename
+			die "error: multiple root type declarations: '$compiler_state->{root_type}' and $typename" if defined $compiler_state->{root_type};
+			$compiler_state->{root_type} = $typename;
 		}
 	}
 
@@ -392,15 +419,17 @@ sub compile {
 	for my $table_type (values %{$self->table_types}) {
 		# compile and add it to the compiled types list
 		if ($table_type->{type} eq 'table') {
-			push @compiled_types, $self->compile_table_type($table_type);
+			push @compiled_types, $self->compile_table_type($compiler_state, $table_type);
 		} elsif ($table_type->{type} eq 'struct') {
-			push @compiled_types, $self->compile_struct_type($table_type);
+			push @compiled_types, $self->compile_struct_type($compiler_state, $table_type);
 		} else {
 			...
 		}
 	}
 
-	return $root_type, \@compiled_types
+	$compiler_state->{compiled_types} = \@compiled_types;
+
+	return $compiler_state #$compiler_state->{root_type}, \@compiled_types
 }
 
 
@@ -472,7 +501,7 @@ sub strip_array_brackets {
 }
 
 sub compile_table_type {
-	my ($self, $data) = @_;
+	my ($self, $compiler_state, $data) = @_;
 	
 	# code header
 	my $code = "package $data->{typename};
@@ -546,10 +575,21 @@ sub deserialize {
 	my ($self, $data, $offset) = @_;
 	$offset //= 0;
 	$self = $self->new unless ref $self;
+';
+	if (defined $compiler_state->{root_type} and $data->{typename} eq $compiler_state->{root_type}) {
+		if (defined $compiler_state->{file_identifier}) {
+			$code .= "
+	# verify file identifier
+	if (\$offset == 0 and '$compiler_state->{file_identifier}' ne substr \$data, 4, 4) {
+		die 'invalid fbs file identifier, \"$compiler_state->{file_identifier}\" expected';
+	}
+";
+		}
+	}
 
+	$code .= '
 	my $object_offset = $offset + unpack "L<", substr $data, $offset, 4;
 	my $vtable_offset = $object_offset - unpack "l<", substr $data, $object_offset, 4;
-
 ';
 
 	# field data deserializers
@@ -679,9 +719,21 @@ sub serialize {
 
 	my @parts = $self->serialize_data;
 	my $root = $parts[0]; # get the root data structure
+';
 
+	if (defined $compiler_state->{root_type} and $data->{typename} eq $compiler_state->{root_type}) {
+		if (defined $compiler_state->{file_identifier}) {
+			$code .= "
+	# insert file identifier
+	unshift \@parts, { type => 'file_identifier', data => '$compiler_state->{file_identifier}' };
+";
+		}
+	}
+
+	$code .= '
 	# header pointer to root data structure
 	unshift @parts, { type => "header", data => "\0\0\0\0", reloc => [{ offset => 0, item => $root, type => "unsigned delta" }] };
+
 
 	my $data = "";
 	my $offset = 0;
@@ -940,7 +992,7 @@ sub serialize_array {
 
 
 sub compile_struct_type {
-	my ($self, $data) = @_;
+	my ($self, $compiler_state, $data) = @_;
 
 	# code header
 	my $code = "package $data->{typename};
