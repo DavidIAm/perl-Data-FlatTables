@@ -6,7 +6,7 @@ use warnings;
 use feature 'say';
 
 use File::Slurp qw/ read_file write_file /;
-use List::Util qw/ any /;
+use List::Util qw/ any none /;
 use Data::Dumper;
 
 
@@ -353,28 +353,8 @@ sub compile {
 
 	my %parsed_types;
 
-	# # first pass to collect key data
-	# for my $statement (@$code) {
-	# 	if ($statement->{type} eq 'namespace_decl') {
-	# 		# set a new current namespace
-	# 		$self->current_namespace($statement->{name} =~ s/\./::/gr);
 
-	# 	} elsif ($statement->{type} eq 'file_identifier_decl') {
-	# 		# set a new current namespace
-	# 		$compiler_state->{file_identifier} = $statement->{name};
-
-	# 	} elsif ($statement->{type} eq 'root_decl') {
-	# 		# set the root object type
-	# 		my $typename = $statement->{name};
-	# 		$typename = $self->current_namespace ."::$typename" if defined $self->current_namespace;
-	# 		$typename = $self->toplevel_namespace . "::$typename" if defined $self->toplevel_namespace;
-
-	# 		die "error: multiple root type declarations: '$compiler_state->{root_type}' and $typename" if defined $compiler_state->{root_type};
-	# 		$compiler_state->{root_type} = $typename;
-	# 	}
-	# }
-
-	# second pass to collect table types
+	# compile the statements
 	for my $statement (@$code) {
 		if ($statement->{type} eq 'namespace_decl') {
 			# set a new current namespace
@@ -411,6 +391,19 @@ sub compile {
 	# parse the size of structs
 	for my $table_type (grep $_->{type} eq 'struct', values %{$self->table_types}) {
 		$self->calculate_struct_length($table_type);
+	}
+
+	# parse all types for their dependancies
+	for my $table_type (values %{$self->table_types}) {
+		for my $field (@{$table_type->{fields}}) {
+			if ($self->is_object_type($field->{type})) {
+				my $type = $self->translate_object_type($field->{type});
+				push @{$table_type->{dependancies}}, $type if none { $type eq $_ } @{$table_type->{dependancies}};
+			} elsif ($self->is_object_array_type($field->{type})) {
+				my $type = $self->translate_object_type($self->is_object_array_type($field->{type}));
+				push @{$table_type->{dependancies}}, $type if none { $type eq $_ } @{$table_type->{dependancies}};
+			}
+		}
 	}
 
 
@@ -468,6 +461,15 @@ sub is_string_type {
 sub is_array_type {
 	my ($self, $type) = @_;
 	return $type =~ /\A\[/
+}
+
+sub is_object_type {
+	my ($self, $type) = @_;
+	if ($self->is_basic_type($type) or $self->is_string_type($type) or $self->is_array_type($type)) {
+		return 0
+	} else {
+		return 1
+	}
 }
 
 sub is_object_array_type {
@@ -985,7 +987,11 @@ sub serialize_array {
 
 ";
 
-	return { type => $data->{struct}{type}, package_name => $data->{typename}, code => $code }
+	# compile usage statements for all package dependancies
+	my $usages = '';
+	$usages .= join '', map "use $_;\n", @{$data->{dependancies}} if defined $data->{dependancies};
+
+	return { type => $data->{struct}{type}, package_name => $data->{typename}, code => $code, usages => $usages }
 }
 
 
@@ -1351,7 +1357,11 @@ sub serialize_array {
 
 ";
 
-	return { type => $data->{struct}{type}, package_name => $data->{typename}, code => $code }
+	# compile usage statements for all package dependancies
+	my $usages = '';
+	$usages .= join '', map "use $_;\n", @{$data->{dependancies}} if defined $data->{dependancies};
+
+	return { type => $data->{struct}{type}, package_name => $data->{typename}, code => $code, usages => $usages }
 }
 
 
@@ -1380,7 +1390,7 @@ sub create_perl_packages {
 		for my $path_length (0 .. $#path - 1) {
 			mkdir join '/', @path[0 .. $path_length];
 		}
-		write_file(join ('/', @path) . '.pm', $file->{code});
+		write_file(join ('/', @path) . '.pm', $file->{usages} . $file->{code});
 	}
 }
 
