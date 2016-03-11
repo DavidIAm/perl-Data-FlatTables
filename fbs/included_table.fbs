@@ -1,0 +1,8 @@
+
+namespace IncludedNamespace;
+
+table IncludedTable {
+	includedkey : string;
+	includedval : int;
+}
+

@@ -428,3 +428,9 @@ test_perl_to_perl('fbs/struct_vector_struct.fbs' => { obj => { vec => [
 test_perl_to_perl('fbs/identifier.fbs' => { val => 15 });
 test_perl_to_flatbuffers('fbs/identifier.fbs' => { val => 15 });
 test_flatbuffers_to_perl('fbs/identifier.fbs' => { val => 15 });
+
+
+test_perl_to_perl('fbs/including_file.fbs' => { val => 15, subtable => { includedkey => 'asdf', includedval => 1337 } });
+test_perl_to_flatbuffers('fbs/including_file.fbs' => { val => 15, subtable => { includedkey => 'asdf', includedval => 1337 } });
+test_flatbuffers_to_perl('fbs/including_file.fbs' => { val => 15, subtable => { includedkey => 'asdf', includedval => 1337 } });
+

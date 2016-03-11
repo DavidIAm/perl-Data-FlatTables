@@ -22,7 +22,8 @@ use Data::Dumper;
 	# enum support
 	# file inclusion
 	# more complex namespace handling
-	# use statements in compiled and written files
+	# strict flatbuffers-compatible mode
+	# default values
 
 
 
@@ -72,7 +73,7 @@ sub create_packages {
 
 # these weren't defined in the grammar. gj google
 my $regex_string_constant = qr/"[^"]*"/xs;
-my $regex_ident = qr/[a-zA-Z_][a-zA-Z_\d]*/x;
+my $regex_ident = qr/[a-zA-Z_][a-zA-Z_\d]*(\.[a-zA-Z_][a-zA-Z_\d]*)*/x;
 
 # definition taken from https://google.github.io/flatbuffers/flatbuffers_grammar.html
 
@@ -132,8 +133,7 @@ my %flatbuffers_basic_types = (
 
 
 sub new {
-	my $class = shift;
-	my %args = @_;
+	my ($class, %args) = @_;
 	my $self = bless {}, $class;
 
 	$self->toplevel_namespace($args{toplevel_namespace});
@@ -151,10 +151,13 @@ sub table_types { @_ > 1 ? $_[0]{table_types} = $_[1] : $_[0]{table_types} }
 sub compile_file {
 	my ($self, $filepath) = @_;
 
+	my $compiler_state = { filepath => $filepath };
+
 	my $text = read_file($filepath);
 
-	my $syntax = $self->parse($text);
-	return $self->compile($syntax);
+	my $syntax = $self->parse($compiler_state, $text);
+	$self->compile($compiler_state, $syntax);
+	return $compiler_state
 }
 
 
@@ -166,7 +169,7 @@ sub strip_string (;$) {
 
 
 sub parse {
-	my ($self, $text) = @_;
+	my ($self, $compiler_state, $text) = @_;
 
 	my @statements;
 
@@ -343,58 +346,69 @@ sub calculate_struct_length {
 
 
 sub compile {
-	my ($self, $code) = @_;
+	my ($self, $compiler_state, $code) = @_;
 
-	# my $current_namespace;
-	my $compiler_state = {
-		root_type => undef,
-		file_identifier => undef,
-	};
+	$compiler_state->{root_type} = undef;
+	$compiler_state->{file_identifier} = undef;
 
 	my %parsed_types;
 
+	my $include_section = 1;
 
-	# compile the statements
+	# interpret the statements
 	for my $statement (@$code) {
-		if ($statement->{type} eq 'namespace_decl') {
-			# set a new current namespace
+		$include_section = 0 unless $statement->{type} eq 'include'; # keep track of whether we can make an include
+
+		if ($statement->{type} eq 'include') { # include another file
+			die "all includes must come before any other statement" unless $include_section;
+
+			my $filepath = $statement->{filepath};
+			$filepath = ($compiler_state->{filepath} =~ s/\A(.*)\/[^\/]*\Z/$1/r) . "/$filepath" unless $filepath =~ /\A\//;
+
+			my $compiled_file = $self->compile_file($filepath) // die "failed to include file $statement->{filepath}";
+			$compiler_state->{compiled_types} = [@{$compiler_state->{compiled_types} // []}, @{$compiled_file->{compiled_types}}];
+
+		} elsif ($statement->{type} eq 'namespace_decl') { # set a new current namespace
 			$self->current_namespace($statement->{name} =~ s/\./::/gr);
 
-		} elsif ($statement->{type} eq 'type_decl') {
+		} elsif ($statement->{type} eq 'type_decl') { # interpret a type declaration
 			# get the top name with appropriate namespacing
-			my $typename = $statement->{struct}{name};
+			my $typename = $statement->{struct}{name} =~ s/\./::/gr;
 			$typename = $self->current_namespace ."::$typename" if defined $self->current_namespace;
 			$typename = $self->toplevel_namespace . "::$typename" if defined $self->toplevel_namespace;
 
 			$statement->{struct}{typename} = $typename;
-			$parsed_types{$statement->{struct}{name}} = $statement->{struct};
 
-		} elsif ($statement->{type} eq 'file_identifier_decl') {
-			# set a new current namespace
+			my $named_type = $statement->{struct}{name};
+			$named_type = ($self->current_namespace =~ s/::/\./gr) .".$named_type" if defined $self->current_namespace;
+
+			$parsed_types{$named_type} = $statement->{struct};
+
+		} elsif ($statement->{type} eq 'file_identifier_decl') { # set a file identifier stub
 			die "file identifier must be 4 characters long" unless 4 == length $statement->{name};
 			$compiler_state->{file_identifier} = $statement->{name};
 
-		} elsif ($statement->{type} eq 'root_decl') {
-			# set the root object type
-			my $typename = $statement->{name};
-			$typename = $self->current_namespace ."::$typename" if defined $self->current_namespace;
-			$typename = $self->toplevel_namespace . "::$typename" if defined $self->toplevel_namespace;
-
-			die "error: multiple root type declarations: '$compiler_state->{root_type}' and $typename" if defined $compiler_state->{root_type};
-			$compiler_state->{root_type} = $typename;
+		} elsif ($statement->{type} eq 'root_decl') { # set the root object type
+			die "error: multiple root type declarations: '$compiler_state->{root_type}' and $statement->{name}" if defined $compiler_state->{root_type};
+			$compiler_state->{root_type} = $statement->{name};
 		}
 	}
 
+	# say "debug created type $_" for keys %parsed_types;
 
-	$self->table_types(\%parsed_types);
+	# append the new parsed types
+	$self->table_types({%{$self->table_types}, %parsed_types});
 	
+	# parse the root_type declaration to a package name
+	$compiler_state->{root_type} = $self->get_object_type($compiler_state->{root_type})->{typename} if defined $compiler_state->{root_type};
+
 	# parse the size of structs
-	for my $table_type (grep $_->{type} eq 'struct', values %{$self->table_types}) {
+	for my $table_type (grep $_->{type} eq 'struct', values %parsed_types) {
 		$self->calculate_struct_length($table_type);
 	}
 
 	# parse all types for their dependancies
-	for my $table_type (values %{$self->table_types}) {
+	for my $table_type (values %parsed_types) {
 		for my $field (@{$table_type->{fields}}) {
 			if ($self->is_object_type($field->{type})) {
 				my $type = $self->translate_object_type($field->{type});
@@ -409,7 +423,7 @@ sub compile {
 
 	# compile the tables and structs
 	my @compiled_types;
-	for my $table_type (values %{$self->table_types}) {
+	for my $table_type (values %parsed_types) {
 		# compile and add it to the compiled types list
 		if ($table_type->{type} eq 'table') {
 			push @compiled_types, $self->compile_table_type($compiler_state, $table_type);
@@ -420,7 +434,7 @@ sub compile {
 		}
 	}
 
-	$compiler_state->{compiled_types} = \@compiled_types;
+	$compiler_state->{compiled_types} = [ @{$compiler_state->{compiled_types} // []}, @compiled_types ];
 
 	return $compiler_state #$compiler_state->{root_type}, \@compiled_types
 }
@@ -485,6 +499,12 @@ sub is_object_array_type {
 
 sub get_object_type {
 	my ($self, $type) = @_;
+
+	# if a non-namespaced or namespace-referenced type by this name exists, return it
+	return $self->table_types->{$type} if defined $self->table_types->{$type};
+	die "no such type found: $type" if $type =~ /\./; # make sure there is no namespace prepended yet
+	# otherwise a try to prepend the current namespace and find it
+	$type = ($self->current_namespace =~ s/::/\./gr) . ".$type";
 	return $self->table_types->{$type} // die "no such type found: $type";
 }
 
@@ -514,8 +534,7 @@ use warnings;
 	# new method preamble
 	$code .= '
 sub new {
-	my $class = shift;
-	my %args = @_;
+	my ($class, %args) = @_;
 	my $self = bless {}, $class;
 
 ';
@@ -1009,8 +1028,7 @@ use warnings;
 	# new method preamble
 	$code .= '
 sub new {
-	my $class = shift;
-	my %args = @_;
+	my ($class, %args) = @_;
 	my $self = bless {}, $class;
 
 ';

@@ -1,0 +1,12 @@
+
+include "included_table.fbs";
+
+namespace Test1;
+
+
+table TableWithInclude {
+	val : int;
+	subtable : IncludedNamespace.IncludedTable;
+}
+
+root_type TableWithInclude;
