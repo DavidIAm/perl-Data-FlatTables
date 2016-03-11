@@ -8,7 +8,7 @@ use File::Slurper qw/ read_text write_binary write_text read_binary /;
 use JSON;
 use Data::Dumper;
 
-use FlatBuffers;
+use Data::FlatTables;
 
 
 # bool values cannot be tested properly because the JSON package decodes boolean as strings instead of 0/1
@@ -61,7 +61,7 @@ sub compare_hashes {
 sub test_perl_to_perl {
 	my ($file, $data) = @_;
 
-	$loaded_files{$file} = FlatBuffers->load($file) unless exists $loaded_files{$file};
+	$loaded_files{$file} = Data::FlatTables->load($file) unless exists $loaded_files{$file};
 	my $class = $loaded_files{$file};
 
 	# serialize the data
@@ -82,7 +82,7 @@ sub test_perl_to_perl {
 sub test_perl_to_flatbuffers {
 	my ($file, $data) = @_;
 
-	$loaded_files{$file} = FlatBuffers->load($file) unless exists $loaded_files{$file};
+	$loaded_files{$file} = Data::FlatTables->load($file) unless exists $loaded_files{$file};
 	my $class = $loaded_files{$file};
 
 	# serialize and write to file
@@ -104,7 +104,7 @@ sub test_perl_to_flatbuffers {
 sub test_flatbuffers_to_perl {
 	my ($file, $data) = @_;
 
-	$loaded_files{$file} = FlatBuffers->load($file) unless exists $loaded_files{$file};
+	$loaded_files{$file} = Data::FlatTables->load($file) unless exists $loaded_files{$file};
 	my $class = $loaded_files{$file};
 
 	# write a neat json file
@@ -434,3 +434,9 @@ test_perl_to_perl('fbs/including_file.fbs' => { val => 15, subtable => { include
 test_perl_to_flatbuffers('fbs/including_file.fbs' => { val => 15, subtable => { includedkey => 'asdf', includedval => 1337 } });
 test_flatbuffers_to_perl('fbs/including_file.fbs' => { val => 15, subtable => { includedkey => 'asdf', includedval => 1337 } });
 
+test_perl_to_perl('fbs/complex_namespaces.fbs' => { val => 15 });
+test_perl_to_flatbuffers('fbs/complex_namespaces.fbs' => { val => 15 });
+test_flatbuffers_to_perl('fbs/complex_namespaces.fbs' => { val => 15 });
+
+test_perl_to_perl('fbs/inline_namespacing.fbs' => { val => 15 });
+# flatbuffers doesn't support inline namespacing

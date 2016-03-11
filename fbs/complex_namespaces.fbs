@@ -1,0 +1,8 @@
+
+namespace Test1.SubTest;
+
+table SubTestTable {
+	val : int;
+}
+
+root_type Test1.SubTest.SubTestTable;

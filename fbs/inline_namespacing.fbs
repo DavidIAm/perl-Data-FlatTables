@@ -1,0 +1,8 @@
+
+namespace Test1;
+
+table SubTest.InlineNamespacedTable {
+	val : int;
+}
+
+root_type Test1.SubTest.InlineNamespacedTable;
