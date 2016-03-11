@@ -17,8 +17,6 @@ use Data::Dumper;
 	# superclass creation instead of self-contained class to prevent code pollution
 	# verify that the method names that we are creating arent reserved
 	# enum support
-	# file inclusion
-	# more complex namespace handling
 	# strict flatbuffers-compatible mode
 	# default values
 
@@ -269,14 +267,12 @@ sub parse_type_decl {
 		/gx) {
 		my ($field_name, $field_type, $default_value, $field_meta, $end_decl) = @+{qw/ field_name field_type default_value field_meta end_decl /};
 		last if defined $end_decl;
-		# say "\tgot field: $field_name, $field_type";
-		# say "\t\tdefault value: $default_value" if defined $default_value;
-		# say "\t\tmeta: $field_meta" if defined $field_meta and $field_meta ne '';
 		my $field = {
 			name => $field_name,
 			type => $field_type,
 		};
 		$field->{default} = $default_value if defined $default_value;
+		die "default values are unsupported for anything other than numeric types" if defined $field->{default} and not $self->is_basic_type($field->{type});
 		$field->{meta} = $self->parse_metadata($field_meta) if defined $field_meta and $field_meta ne '';
 		$field->{length} = $self->get_type_length($field->{type});
 		push @fields, $field;
@@ -532,8 +528,11 @@ sub new {
 	# setting all fields from args
 	for my $field (@{$data->{fields}}) {
 		my $type = $field->{type};
-		if ($self->is_basic_type($type) or $self->is_string_type($type)) {
-			$code .= "\t\$self->$field->{name}(\$args{$field->{name}}) if exists \$args{$field->{name}};\n";
+		if ($self->is_basic_type($type)) {
+			my $default = int ($field->{default} // 0);
+			$code .= "\t\$self->$field->{name}(\$args{$field->{name}}) if defined \$args{$field->{name}} and \$args{$field->{name}} != $default;\n";
+		} elsif ($self->is_string_type($type)) {
+			$code .= "\t\$self->$field->{name}(\$args{$field->{name}}) if defined \$args{$field->{name}};\n";
 		} elsif ($self->is_array_type($type)) {
 			if ($self->is_object_array_type($type)) {
 				$type = $self->translate_object_type($type);
@@ -575,7 +574,12 @@ sub flatbuffers_type { '$data->{type}' }
 
 	# field getter/setter functions
 	for my $field (@{$data->{fields}}) {
-		$code .= "sub $field->{name} { \@_ > 1 ? \$_[0]{$field->{name}} = \$_[1] : \$_[0]{$field->{name}} }\n";
+		if ($self->is_basic_type($field->{type})) {
+			my $default = int ($field->{default} // 0);
+			$code .= "sub $field->{name} { \@_ > 1 ? \$_[0]{$field->{name}} = ( \$_[1] == $default ? undef : \$_[1]) : \$_[0]{$field->{name}} // $default }\n";
+		} else {
+			$code .= "sub $field->{name} { \@_ > 1 ? \$_[0]{$field->{name}} = \$_[1] : \$_[0]{$field->{name}} }\n";
+		}
 	}
 
 	my $vtable_item_count = 2 + scalar @{$data->{fields}};
@@ -796,7 +800,7 @@ sub serialize_vtable {
 		my $type = $field->{type};
 		if ($self->is_basic_type($type) or $self->is_string_type($type) or $self->is_array_type($type)) {
 			$code .= "
-	if (defined \$self->$field->{name}) {
+	if (defined \$self->{$field->{name}}) {
 		push \@data, \$offset;
 		\$offset += $field->{length};
 	} else {
@@ -807,7 +811,7 @@ sub serialize_vtable {
 			my $table_type = $self->get_object_type($type);
 			if ($table_type->{type} eq 'table') {
 			$code .= "
-	if (defined \$self->$field->{name}) {
+	if (defined \$self->{$field->{name}}) {
 		push \@data, \$offset;
 		\$offset += $field->{length};
 	} else {
@@ -816,7 +820,7 @@ sub serialize_vtable {
 ";
 			} elsif ($table_type->{type} eq 'struct') {
 			$code .= "
-	if (defined \$self->$field->{name}) {
+	if (defined \$self->{$field->{name}}) {
 		push \@data, \$offset;
 		\$offset += $table_type->{typename}->struct_length;
 	} else {
@@ -868,7 +872,7 @@ sub serialize_data {
 	# field data serializers
 	for my $field (@{$data->{fields}}) {
 		$code .= "
-	if (defined \$self->$field->{name}) {
+	if (defined \$self->{$field->{name}}) {
 		";
 		my $type = $field->{type};
 		if ($self->is_basic_type($type)) {
@@ -1026,12 +1030,9 @@ sub new {
 	# setting all fields from args
 	for my $field (@{$data->{fields}}) {
 		my $type = $field->{type};
-		if ($self->is_basic_type($type)) {
-			$code .= "\t\$self->$field->{name}(\$args{$field->{name}});\n";
-		} elsif ($self->is_string_type($type)) {
+		if ($self->is_basic_type($type) or $self->is_string_type($type)) {
 			$code .= "\t\$self->$field->{name}(\$args{$field->{name}});\n";
 		} elsif ($self->is_array_type($type)) {
-			# $code .= "\t\$self->$field->{name}(\$args{$field->{name}});\n";
 			if ($self->is_object_array_type($type)) {
 				my $type = $self->translate_object_type($type);
 

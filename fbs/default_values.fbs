@@ -1,0 +1,8 @@
+
+namespace Test1;
+
+table DefaultTable {
+	val : int = 15;
+}
+
+root_type Test1.DefaultTable;

@@ -15,6 +15,7 @@ use Data::FlatTables;
 # 0 integer values are mostly incompatible with flatbuffers because flatbuffers for some reason just skips the fields 0 value when serializing
 # flatbuffers forbids anything but scalars and struct fields inside structs
 # flatbuffers doesnt support nested arrays
+# flatbuffers doesnt support inline namespacing
 
 
 # settings
@@ -156,19 +157,19 @@ test_perl_to_perl('fbs/stringy.fbs' => { val => 'asdf' });
 test_perl_to_perl('fbs/stringy.fbs' => { val => 'lol' x 256 });
 test_perl_to_perl('fbs/stringy.fbs' => { type => 14, val => 'lol' x 256, ending => 500 });
 test_perl_to_perl('fbs/stringy.fbs' => { val => 'asdf', val2 => 'qwerty', val15 => '' });
-test_perl_to_perl('fbs/stringy.fbs' => { val => "12456789", val2 => '', val15 => 'asdfasdfasd', padding => 0, padding2 => 0x7fffffff });
+test_perl_to_perl('fbs/stringy.fbs' => { val => "12456789", val2 => '', val15 => 'asdfasdfasd', padding => 1, padding2 => 0x7fffffff });
 
 test_perl_to_flatbuffers('fbs/stringy.fbs' => { val => 'asdf' });
 test_perl_to_flatbuffers('fbs/stringy.fbs' => { val => 'lol' x 256 });
 test_perl_to_flatbuffers('fbs/stringy.fbs' => { type => 14, val => 'lol' x 256, ending => 500 });
 test_perl_to_flatbuffers('fbs/stringy.fbs' => { val => 'asdf', val2 => 'qwerty', val15 => '' });
-test_perl_to_flatbuffers('fbs/stringy.fbs' => { val => "12456789", val2 => '', val15 => 'asdfasdfasd', padding => 0, padding2 => 0x7fffffff });
+test_perl_to_flatbuffers('fbs/stringy.fbs' => { val => "12456789", val2 => '', val15 => 'asdfasdfasd', padding => 1, padding2 => 0x7fffffff });
 
 test_flatbuffers_to_perl('fbs/stringy.fbs' => { val => 'asdf' });
 test_flatbuffers_to_perl('fbs/stringy.fbs' => { val => 'lol' x 256 });
 test_flatbuffers_to_perl('fbs/stringy.fbs' => { type => 14, val => 'lol' x 256, ending => 500 });
 test_flatbuffers_to_perl('fbs/stringy.fbs' => { val => 'asdf', val2 => 'qwerty', val15 => '' });
-# test skipped because flatbuffers arbitrarily skips serializing fields with a value of 0, thus making this test always fail
+test_flatbuffers_to_perl('fbs/stringy.fbs' => { val => "12456789", val2 => '', val15 => 'asdfasdfasd', padding => 1, padding2 => 0x7fffffff });
 
 test_perl_to_perl('fbs/subtable.fbs' => { subtable => { a => 15, b => 30 } });
 test_perl_to_perl('fbs/subtable.fbs' => { id => 1, subtable => { a => 15 }, pad => 100 });
@@ -386,7 +387,7 @@ test_flatbuffers_to_perl('fbs/table_vectors.fbs' => { vec => [
 
 
 test_perl_to_perl('fbs/nested_table_vectors.fbs' => { vec => [
-	[], [{ val => 1 }, { val => 3 },], [{}, {}], [{ val => 5 }, { val => 16 }, { val => 0 },]
+	[], [{ val => 1 }, { val => 3 },], [{}, {}], [{ val => 5 }, { val => 16 }, { val => 1000 },]
 ] });
 # no testing with flatbuffers because flatbuffers doesnt support nested vectors
 
