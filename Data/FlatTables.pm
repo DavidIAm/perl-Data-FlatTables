@@ -129,13 +129,11 @@ my %flatbuffers_basic_types = (
 my %flattables_reserved_methods = map { $_ => 1 }
 qw/
 	new
-	struct_length
+	flatbuffers_struct_length
 	flatbuffers_type
 	deserialize
 	deserialize_string
 	deserialize_array
-	is_array_type
-	strip_array_brackets
 	serialize
 	serialize_vtable
 	serialize_data
@@ -730,20 +728,10 @@ my %basic_types = (
 	double => { format => "d<", length => 8 },
 );
 
-sub is_array_type {
-	my ($self, $type) = @_;
-	return $type =~ /\A\[/
-}
-
-sub strip_array_brackets {
-	my ($self, $type) = @_;
-	return $type =~ s/\A\[(.*)\]\Z/$1/sr
-}
-
 sub deserialize_array {
 	my ($self, $array_type, $data, $offset) = @_;
 
-	$array_type = $self->strip_array_brackets($array_type);
+	$array_type = $array_type =~ s/\A\[(.*)\]\Z/$1/sr;
 
 	$offset = $offset + unpack "L<", substr $data, $offset, 4; # dereference the array pointer
 	my $array_length = unpack "L<", substr $data, $offset, 4; # get the length
@@ -761,7 +749,7 @@ sub deserialize_array {
 			map $_ * 4,
 			0 .. ($array_length - 1);
 
-	} elsif ($self->is_array_type($array_type)) { # if its an array of strings
+	} elsif ($array_type =~ /\A\[/) { # if its an array of strings
 		@array = map { $self->deserialize_array($array_type, $data, $offset + $_) }
 			map $_ * 4,
 			0 .. ($array_length - 1);
@@ -772,7 +760,7 @@ sub deserialize_array {
 				map $_ * 4,
 				0 .. ($array_length - 1);
 		} elsif ($array_type->flatbuffers_type eq "struct") {
-			my $length = $array_type->struct_length;
+			my $length = $array_type->flatbuffers_struct_length;
 			@array = map { $array_type->deserialize($data, $offset + $_) }
 				map $_ * $length,
 				0 .. ($array_length - 1);
@@ -881,7 +869,7 @@ sub serialize_vtable {
 			$code .= "
 	if (defined \$self->{$field->{name}}) {
 		push \@data, \$offset;
-		\$offset += $table_type->{typename}->struct_length;
+		\$offset += $table_type->{typename}->flatbuffers_struct_length;
 	} else {
 		push \@data, 0;
 	}
@@ -1003,7 +991,7 @@ sub serialize_string {
 sub serialize_array {
 	my ($self, $array_type, $array) = @_;
 
-	$array_type = $self->strip_array_brackets($array_type);
+	$array_type = $array_type =~ s/\A\[(.*)\]\Z/$1/sr;
 
 	my $data = pack "L<", scalar @$array;
 	my @array_objects;
@@ -1019,7 +1007,7 @@ sub serialize_array {
 			push @array_objects, $string_object;
 			push @reloc, { offset => 4 + $i * 4, item => $string_object, type => "unsigned delta" };
 		}
-	} elsif ($self->is_array_type($array_type)) { # array of arrays
+	} elsif ($array_type =~ /\A\[/) { # array of arrays
 		$data .= "\0\0\0\0" x @$array;
 		for my $i (0 .. $#$array) {
 			my ($array_object, @child_array_objects) = $self->serialize_array($array_type, $array->[$i]);
@@ -1239,20 +1227,10 @@ my %basic_types = (
 	double => { format => "d<", length => 8 },
 );
 
-sub is_array_type {
-	my ($self, $type) = @_;
-	return $type =~ /\A\[/
-}
-
-sub strip_array_brackets {
-	my ($self, $type) = @_;
-	return $type =~ s/\A\[(.*)\]\Z/$1/sr
-}
-
 sub deserialize_array {
 	my ($self, $array_type, $data, $offset) = @_;
 
-	$array_type = $self->strip_array_brackets($array_type);
+	$array_type = $array_type =~ s/\A\[(.*)\]\Z/$1/sr;
 
 	$offset = $offset + unpack "L<", substr $data, $offset, 4; # dereference the array pointer
 	my $array_length = unpack "L<", substr $data, $offset, 4; # get the length
@@ -1270,7 +1248,7 @@ sub deserialize_array {
 			map $_ * 4,
 			0 .. ($array_length - 1);
 
-	} elsif ($self->is_array_type($array_type)) { # if its an array of strings
+	} elsif ($array_type =~ /\A\[/) { # if its an array of strings
 		@array = map { $self->deserialize_array($array_type, $data, $offset + $_) }
 			map $_ * 4,
 			0 .. ($array_length - 1);
@@ -1281,7 +1259,7 @@ sub deserialize_array {
 				map $_ * 4,
 				0 .. ($array_length - 1);
 		} elsif ($array_type->flatbuffers_type eq "struct") {
-			my $length = $array_type->struct_length;
+			my $length = $array_type->flatbuffers_struct_length;
 			@array = map { $array_type->deserialize($data, $offset + $_) }
 				map $_ * $length,
 				0 .. ($array_length - 1);
@@ -1378,7 +1356,7 @@ sub serialize_data {
 	# struct length constant
 	$code .= "
 
-sub struct_length { $offset }
+sub flatbuffers_struct_length { $offset }
 
 ";
 
@@ -1402,7 +1380,7 @@ sub serialize_string {
 sub serialize_array {
 	my ($self, $array_type, $array) = @_;
 
-	$array_type = $self->strip_array_brackets($array_type);
+	$array_type = $array_type =~ s/\A\[(.*)\]\Z/$1/sr;
 
 	my $data = pack "L<", scalar @$array;
 	my @array_objects;
@@ -1418,7 +1396,7 @@ sub serialize_array {
 			push @array_objects, $string_object;
 			push @reloc, { offset => 4 + $i * 4, item => $string_object, type => "unsigned delta" };
 		}
-	} elsif ($self->is_array_type($array_type)) { # array of arrays
+	} elsif ($array_type =~ /\A\[/) { # array of arrays
 		$data .= "\0\0\0\0" x @$array;
 		for my $i (0 .. $#$array) {
 			my ($array_object, @child_array_objects) = $self->serialize_array($array_type, $array->[$i]);
