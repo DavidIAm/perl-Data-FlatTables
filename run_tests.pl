@@ -19,7 +19,7 @@ use Data::FlatTables;
 
 
 # settings
-my $flatbuffers_compiler = 'flatc';
+my $flatbuffers_compiler = '~/Downloads/flatbuffers/flatc';
 
 my %loaded_files; # prevent double loading files
 

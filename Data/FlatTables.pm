@@ -18,7 +18,7 @@ use Data::Dumper;
 	# verify that the method names that we are creating arent reserved
 	# enum support
 	# strict flatbuffers-compatible mode
-	# default values
+	# default values for strings
 
 
 
@@ -123,6 +123,24 @@ my %flatbuffers_basic_types = (
 
 
 
+
+
+
+my %flattables_reserved_methods = map { $_ => 1 }
+qw/
+	new
+	flatbuffers_type
+	deserialize
+	deserialize_string
+	is_array_type
+	strip_array_brackets
+	deserialize_array
+	serialize
+	serialize_vtable
+	serialize_data
+	serialize_string
+	serialize_array
+/;
 
 
 
@@ -449,6 +467,11 @@ sub get_type_length {
 	}
 }
 
+sub is_method_reserved {
+	my ($self, $name) = @_;
+	return exists $flattables_reserved_methods{$name}
+}
+
 sub is_basic_type {
 	my ($self, $type) = @_;
 	return exists $flatbuffers_basic_types{$type}
@@ -530,9 +553,9 @@ sub new {
 		my $type = $field->{type};
 		if ($self->is_basic_type($type)) {
 			my $default = int ($field->{default} // 0);
-			$code .= "\t\$self->$field->{name}(\$args{$field->{name}}) if defined \$args{$field->{name}} and \$args{$field->{name}} != $default;\n";
+			$code .= "\t\$self->{$field->{name}} = \$args{$field->{name}} if defined \$args{$field->{name}} and \$args{$field->{name}} != $default;\n";
 		} elsif ($self->is_string_type($type)) {
-			$code .= "\t\$self->$field->{name}(\$args{$field->{name}}) if defined \$args{$field->{name}};\n";
+			$code .= "\t\$self->{$field->{name}} = \$args{$field->{name}} if defined \$args{$field->{name}};\n";
 		} elsif ($self->is_array_type($type)) {
 			if ($self->is_object_array_type($type)) {
 				$type = $self->translate_object_type($type);
@@ -543,21 +566,21 @@ sub new {
 				my $true_type = $type;
 				$true_type = $self->strip_array_brackets($true_type) for 1 .. $nest_levels;
 
-				$code .= "\t\$self->$field->{name}(\n";
+				$code .= "\t\$self->{$field->{name}} = \n";
 				$code .= "\t\t". "[ map { " x $nest_levels;
 
 				$code .= "\n\t\t\t$true_type->new(\%\$_)\n";
 
 				$code .= "\t\t". " } \@\$_ ] " x ($nest_levels - 1);
-				$code .= "} \@{\$args{$field->{name}}} ]\n\t) if exists \$args{$field->{name}};\n";
+				$code .= "} \@{\$args{$field->{name}}} ]\n\tif exists \$args{$field->{name}};\n";
 
 			} else {
-				$code .= "\t\$self->$field->{name}(\$args{$field->{name}}) if exists \$args{$field->{name}};\n";
+				$code .= "\t\$self->{$field->{name}} = \$args{$field->{name}} if exists \$args{$field->{name}};\n";
 			}
 		} else {
 			my $table_type = $self->get_object_type($type);
 			my $typename = $table_type->{typename};
-			$code .= "\t\$self->$field->{name}($typename->new(%{\$args{$field->{name}}})) if exists \$args{$field->{name}};\n";
+			$code .= "\t\$self->{$field->{name}} = $typename->new(%{\$args{$field->{name}}}) if exists \$args{$field->{name}};\n";
 		}
 	}
 
@@ -574,11 +597,15 @@ sub flatbuffers_type { '$data->{type}' }
 
 	# field getter/setter functions
 	for my $field (@{$data->{fields}}) {
-		if ($self->is_basic_type($field->{type})) {
-			my $default = int ($field->{default} // 0);
-			$code .= "sub $field->{name} { \@_ > 1 ? \$_[0]{$field->{name}} = ( \$_[1] == $default ? undef : \$_[1]) : \$_[0]{$field->{name}} // $default }\n";
+		if ($self->is_method_reserved($field->{name})) {
+			warn "Warning: '$field->{name}' is a reserved name and will not get an getter/setter method";
 		} else {
-			$code .= "sub $field->{name} { \@_ > 1 ? \$_[0]{$field->{name}} = \$_[1] : \$_[0]{$field->{name}} }\n";
+			if ($self->is_basic_type($field->{type})) {
+				my $default = int ($field->{default} // 0);
+				$code .= "sub $field->{name} { \@_ > 1 ? \$_[0]{$field->{name}} = ( \$_[1] == $default ? undef : \$_[1]) : \$_[0]{$field->{name}} // $default }\n";
+			} else {
+				$code .= "sub $field->{name} { \@_ > 1 ? \$_[0]{$field->{name}} = \$_[1] : \$_[0]{$field->{name}} }\n";
+			}
 		}
 	}
 
@@ -618,19 +645,19 @@ sub deserialize {
 		my $type = $field->{type};
 		if ($self->is_basic_type($type)) {
 			my $type = $flatbuffers_basic_types{$type};
-			$code .= "\$self->$field->{name}(unpack '$type->{format}', substr \$data, \$object_offset + \$offset, $type->{length});";
+			$code .= "\$self->{$field->{name}} = unpack '$type->{format}', substr \$data, \$object_offset + \$offset, $type->{length};";
 
 		} elsif ($self->is_string_type($type)) {
-			$code .= "\$self->$field->{name}(\$self->deserialize_string(\$data, \$object_offset + \$offset));";
+			$code .= "\$self->{$field->{name}} = \$self->deserialize_string(\$data, \$object_offset + \$offset);";
 
 		} elsif ($self->is_array_type($type)) {
 			$type = $self->translate_object_type($type) if $self->is_object_array_type($type);
-			$code .= "\$self->$field->{name}(\$self->deserialize_array('$type', \$data, \$object_offset + \$offset));";
+			$code .= "\$self->{$field->{name}} = \$self->deserialize_array('$type', \$data, \$object_offset + \$offset);";
 
 		} else {
 			my $table_type = $self->get_object_type($type);
 			my $typename = $table_type->{typename};
-			$code .= "\$self->$field->{name}($typename->deserialize(\$data, \$object_offset + \$offset));";
+			$code .= "\$self->{$field->{name}} = $typename->deserialize(\$data, \$object_offset + \$offset);";
 		}
 		$code .= "
 	}
@@ -876,10 +903,10 @@ sub serialize_data {
 		";
 		my $type = $field->{type};
 		if ($self->is_basic_type($type)) {
-			$code .= "\$data .= pack '$flatbuffers_basic_types{$type}{format}', \$self->$field->{name};";
+			$code .= "\$data .= pack '$flatbuffers_basic_types{$type}{format}', \$self->{$field->{name}};";
 
 		} elsif ($self->is_string_type($type)) {
-			$code .= qq/my \$string_object = \$self->serialize_string(\$self->$field->{name});
+			$code .= qq/my \$string_object = \$self->serialize_string(\$self->{$field->{name}});
 		push \@objects, \$string_object;
 		push \@reloc, { offset => length (\$data), item => \$string_object, type => 'unsigned delta'};
 		\$data .= \"\\0\\0\\0\\0\";/;
@@ -887,7 +914,7 @@ sub serialize_data {
 		} elsif ($self->is_array_type($type)) {
 			my $type = $type;
 			$type = $self->translate_object_type($type) if $self->is_object_array_type($type);
-			$code .= qq/my (\$array_object, \@array_objects) = \$self->serialize_array('$type', \$self->$field->{name});
+			$code .= qq/my (\$array_object, \@array_objects) = \$self->serialize_array('$type', \$self->{$field->{name}});
 		push \@objects, \$array_object, \@array_objects;
 		push \@reloc, { offset => length (\$data), item => \$array_object, type => 'unsigned delta'};
 		\$data .= \"\\0\\0\\0\\0\";/;
@@ -896,12 +923,12 @@ sub serialize_data {
 			my $table_type = $self->get_object_type($type);
 			
 			if ($table_type->{type} eq 'table') {
-				$code .= qq/my (\$root_object, \@table_objects) = \$self->$field->{name}->serialize_data;
+				$code .= qq/my (\$root_object, \@table_objects) = \$self->{$field->{name}}->serialize_data;
 		push \@objects, \$root_object, \@table_objects;
 		push \@reloc, { offset => length (\$data), item => \$root_object, type => 'unsigned delta' };
 		\$data .= \"\\0\\0\\0\\0\";/;
 			} elsif ($table_type->{type} eq 'struct') {
-				$code .= qq/my (\$root_object, \@struct_objects) = \$self->$field->{name}->serialize_data;
+				$code .= qq/my (\$root_object, \@struct_objects) = \$self->{$field->{name}}->serialize_data;
 		push \@objects, \@struct_objects;
 		push \@reloc, map { \$_->{offset} += length (\$data); \$_ } \@{\$root_object->{reloc}};
 		\$data .= \$root_object->{data};/;
@@ -1073,7 +1100,11 @@ sub flatbuffers_type { '$data->{type}' }
 
 	# field getter/setter functions
 	for my $field (@{$data->{fields}}) {
-		$code .= "sub $field->{name} { \@_ > 1 ? \$_[0]{$field->{name}} = \$_[1] : \$_[0]{$field->{name}} }\n";
+		if ($self->is_method_reserved($field->{name})) {
+			warn "Warning: '$field->{name}' is a reserved name and will not get an getter/setter method";
+		} else {
+			$code .= "sub $field->{name} { \@_ > 1 ? \$_[0]{$field->{name}} = \$_[1] : \$_[0]{$field->{name}} }\n";
+		}
 	}
 
 
@@ -1097,18 +1128,18 @@ sub deserialize {
 		my $type = $field->{type};
 		if ($self->is_basic_type($type)) {
 			my $type = $flatbuffers_basic_types{$type};
-			$code .= "\$self->$field->{name}(unpack '$type->{format}', substr \$data, \$offset + $offset, $type->{length});";
+			$code .= "\$self->{$field->{name}} = unpack '$type->{format}', substr \$data, \$offset + $offset, $type->{length};";
 
 		} elsif ($self->is_string_type($type)) {
-			$code .= "\$self->$field->{name}(\$self->deserialize_string(\$data, \$offset + $offset));";
+			$code .= "\$self->{$field->{name}} = \$self->deserialize_string(\$data, \$offset + $offset);";
 		} elsif ($self->is_array_type($type)) {
 			$type = $self->translate_object_type($type) if $self->is_object_array_type($type);
-			$code .= "\$self->$field->{name}(\$self->deserialize_array('$type', \$data, \$offset + $offset));";
+			$code .= "\$self->{$field->{name}} = \$self->deserialize_array('$type', \$data, \$offset + $offset);";
 
 		} else {
 			my $table_type = $self->get_object_type($type);
 			my $typename = $table_type->{typename};
-			$code .= "\$self->$field->{name}($typename->deserialize(\$data, \$offset + $offset));";
+			$code .= "\$self->{$field->{name}} = $typename->deserialize(\$data, \$offset + $offset);";
 			$offset += $table_type->{struct_length} - 4 if $table_type->{type} eq 'struct';
 		}
 		$offset += $field->{length};
@@ -1225,11 +1256,11 @@ sub serialize_data {
 		my $type = $field->{type};
 		if ($self->is_basic_type($type)) {
 			my $type = $flatbuffers_basic_types{$type};
-			$code .= "\$data .= pack '$type->{format}', \$self->$field->{name} // die 'struct $data->{typename} requires field $field->{name}';";
+			$code .= "\$data .= pack '$type->{format}', \$self->{$field->{name}} // die 'struct $data->{typename} requires field $field->{name}';";
 
 		} elsif ($self->is_string_type($type)) {
 			$code .= qq/do {
-			my \$string_object = \$self->serialize_string(\$self->$field->{name});
+			my \$string_object = \$self->serialize_string(\$self->{$field->{name}});
 			push \@objects, \$string_object;
 			push \@reloc, { offset => length (\$data), item => \$string_object, type => 'unsigned delta'};
 			\$data .= \"\\0\\0\\0\\0\";
@@ -1238,7 +1269,7 @@ sub serialize_data {
 		} elsif ($self->is_array_type($type)) {
 			$type = $self->translate_object_type($type) if $self->is_object_array_type($type);
 			$code .= qq/do {
-			my (\$array_object, \@array_objects) = \$self->serialize_array('$type', \$self->$field->{name});
+			my (\$array_object, \@array_objects) = \$self->serialize_array('$type', \$self->{$field->{name}});
 			push \@objects, \$array_object, \@array_objects;
 			push \@reloc, { offset => length (\$data), item => \$array_object, type => 'unsigned delta'};
 			\$data .= \"\\0\\0\\0\\0\";
@@ -1249,7 +1280,7 @@ sub serialize_data {
 			
 			if ($table_type->{type} eq 'table') {
 				$code .= qq/do {
-			my (\$root_object, \@table_objects) = \$self->$field->{name}->serialize_data;
+			my (\$root_object, \@table_objects) = \$self->{$field->{name}}->serialize_data;
 			push \@objects, \$root_object, \@table_objects;
 			push \@reloc, { offset => length (\$data), item => \$root_object, type => 'unsigned delta' };
 			\$data .= \"\\0\\0\\0\\0\";
@@ -1257,7 +1288,7 @@ sub serialize_data {
 
 			} elsif ($table_type->{type} eq 'struct') {
 				$code .= qq/do {
-			my (\$root_object, \@struct_objects) = \$self->$field->{name}->serialize_data;
+			my (\$root_object, \@struct_objects) = \$self->{$field->{name}}->serialize_data;
 			push \@objects, \@struct_objects;
 			push \@reloc, map { \$_->{offset} += length (\$data); \$_ } \@{\$root_object->{reloc}};
 			\$data .= \$root_object->{data};

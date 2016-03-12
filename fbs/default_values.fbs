@@ -3,6 +3,7 @@ namespace Test1;
 
 table DefaultTable {
 	val : int = 15;
+	new : int;
 }
 
 root_type Test1.DefaultTable;
