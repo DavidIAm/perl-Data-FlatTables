@@ -129,12 +129,13 @@ my %flatbuffers_basic_types = (
 my %flattables_reserved_methods = map { $_ => 1 }
 qw/
 	new
+	struct_length
 	flatbuffers_type
 	deserialize
 	deserialize_string
+	deserialize_array
 	is_array_type
 	strip_array_brackets
-	deserialize_array
 	serialize
 	serialize_vtable
 	serialize_data
@@ -600,9 +601,40 @@ sub flatbuffers_type { '$data->{type}' }
 		if ($self->is_method_reserved($field->{name})) {
 			warn "Warning: '$field->{name}' is a reserved name and will not get an getter/setter method";
 		} else {
-			if ($self->is_basic_type($field->{type})) {
+			my $type = $field->{type};
+			if ($self->is_basic_type($type)) {
 				my $default = int ($field->{default} // 0);
 				$code .= "sub $field->{name} { \@_ > 1 ? \$_[0]{$field->{name}} = ( \$_[1] == $default ? undef : \$_[1]) : \$_[0]{$field->{name}} // $default }\n";
+
+			} elsif ($self->is_object_type($type)) {
+				my $table_type = $self->get_object_type($type);
+				my $typename = $table_type->{typename};
+				$code .= "sub $field->{name} {
+	my (\$self, \$val) = \@_;
+	\$val = $typename->new(\%\$val) if defined \$val and not UNIVERSAL::can(\$val, 'can'); # bless it if not yet blessed
+	return \@_ > 1 ? \$self->{$field->{name}} = \$val : \$self->{$field->{name}};
+}
+";
+			} elsif ($self->is_object_array_type($type)) {
+				$type = $self->translate_object_type($type);
+
+				... unless $type =~ /\A(\[+)/;
+				my $nest_levels = length $1;
+
+				my $true_type = $type;
+				$true_type = $self->strip_array_brackets($true_type) for 1 .. $nest_levels;
+
+				$code .= "sub $field->{name} { 
+	\@_ > 1 ? \$_[0]{$field->{name}} = 
+";
+				$code .= "\t\t". "[ map { " x $nest_levels;
+
+				$code .= "\n\t\t\t(ref and not UNIVERSAL::can(\$_, 'can')) ? $true_type->new(\%\$_) : \$_\n";
+
+				$code .= "\t\t". " } \@\$_ ] " x ($nest_levels - 1);
+				$code .= "} \@{\$_[1]} ]\n\t : \$_[0]{$field->{name}}
+}\n";
+
 			} else {
 				$code .= "sub $field->{name} { \@_ > 1 ? \$_[0]{$field->{name}} = \$_[1] : \$_[0]{$field->{name}} }\n";
 			}
@@ -1100,8 +1132,37 @@ sub flatbuffers_type { '$data->{type}' }
 
 	# field getter/setter functions
 	for my $field (@{$data->{fields}}) {
+		my $type = $field->{type};
 		if ($self->is_method_reserved($field->{name})) {
 			warn "Warning: '$field->{name}' is a reserved name and will not get an getter/setter method";
+		} elsif ($self->is_object_type($type)) {
+				my $table_type = $self->get_object_type($type);
+				my $typename = $table_type->{typename};
+				$code .= "sub $field->{name} {
+	my (\$self, \$val) = \@_;
+	\$val = $typename->new(\%\$val) if defined \$val and not UNIVERSAL::can(\$val, 'can'); # bless it if not yet blessed
+	return \@_ > 1 ? \$self->{$field->{name}} = \$val : \$self->{$field->{name}};
+}
+";
+		} elsif ($self->is_object_array_type($type)) {
+			$type = $self->translate_object_type($type);
+
+			... unless $type =~ /\A(\[+)/;
+			my $nest_levels = length $1;
+
+			my $true_type = $type;
+			$true_type = $self->strip_array_brackets($true_type) for 1 .. $nest_levels;
+
+			$code .= "sub $field->{name} { 
+	\@_ > 1 ? \$_[0]{$field->{name}} = 
+";
+			$code .= "\t\t". "[ map { " x $nest_levels;
+
+			$code .= "\n\t\t\t(ref and not UNIVERSAL::can(\$_, 'can')) ? $true_type->new(\%\$_) : \$_\n";
+
+			$code .= "\t\t". " } \@\$_ ] " x ($nest_levels - 1);
+			$code .= "} \@{\$_[1]} ]\n\t : \$_[0]{$field->{name}}
+}\n";
 		} else {
 			$code .= "sub $field->{name} { \@_ > 1 ? \$_[0]{$field->{name}} = \$_[1] : \$_[0]{$field->{name}} }\n";
 		}
@@ -1260,39 +1321,39 @@ sub serialize_data {
 
 		} elsif ($self->is_string_type($type)) {
 			$code .= qq/do {
-			my \$string_object = \$self->serialize_string(\$self->{$field->{name}});
-			push \@objects, \$string_object;
-			push \@reloc, { offset => length (\$data), item => \$string_object, type => 'unsigned delta'};
-			\$data .= \"\\0\\0\\0\\0\";
-		};/;
+		my \$string_object = \$self->serialize_string(\$self->{$field->{name}});
+		push \@objects, \$string_object;
+		push \@reloc, { offset => length (\$data), item => \$string_object, type => 'unsigned delta'};
+		\$data .= \"\\0\\0\\0\\0\";
+	};/;
 
 		} elsif ($self->is_array_type($type)) {
 			$type = $self->translate_object_type($type) if $self->is_object_array_type($type);
 			$code .= qq/do {
-			my (\$array_object, \@array_objects) = \$self->serialize_array('$type', \$self->{$field->{name}});
-			push \@objects, \$array_object, \@array_objects;
-			push \@reloc, { offset => length (\$data), item => \$array_object, type => 'unsigned delta'};
-			\$data .= \"\\0\\0\\0\\0\";
-		};/;
+		my (\$array_object, \@array_objects) = \$self->serialize_array('$type', \$self->{$field->{name}});
+		push \@objects, \$array_object, \@array_objects;
+		push \@reloc, { offset => length (\$data), item => \$array_object, type => 'unsigned delta'};
+		\$data .= \"\\0\\0\\0\\0\";
+	};/;
 
 		} else { # table serialization
 			my $table_type = $self->get_object_type($type);
 			
 			if ($table_type->{type} eq 'table') {
 				$code .= qq/do {
-			my (\$root_object, \@table_objects) = \$self->{$field->{name}}->serialize_data;
-			push \@objects, \$root_object, \@table_objects;
-			push \@reloc, { offset => length (\$data), item => \$root_object, type => 'unsigned delta' };
-			\$data .= \"\\0\\0\\0\\0\";
-		};/;
+		my (\$root_object, \@table_objects) = \$self->{$field->{name}}->serialize_data;
+		push \@objects, \$root_object, \@table_objects;
+		push \@reloc, { offset => length (\$data), item => \$root_object, type => 'unsigned delta' };
+		\$data .= \"\\0\\0\\0\\0\";
+	};/;
 
 			} elsif ($table_type->{type} eq 'struct') {
 				$code .= qq/do {
-			my (\$root_object, \@struct_objects) = \$self->{$field->{name}}->serialize_data;
-			push \@objects, \@struct_objects;
-			push \@reloc, map { \$_->{offset} += length (\$data); \$_ } \@{\$root_object->{reloc}};
-			\$data .= \$root_object->{data};
-		};/;
+		my (\$root_object, \@struct_objects) = \$self->{$field->{name}}->serialize_data;
+		push \@objects, \@struct_objects;
+		push \@reloc, map { \$_->{offset} += length (\$data); \$_ } \@{\$root_object->{reloc}};
+		\$data .= \$root_object->{data};
+	};/;
 
 			} else {
 				...

@@ -7,6 +7,7 @@ use feature qw/ say /;
 use File::Slurper qw/ read_text write_binary write_text read_binary /;
 use JSON;
 use Data::Dumper;
+use Carp;
 
 use Data::FlatTables;
 
@@ -19,7 +20,7 @@ use Data::FlatTables;
 
 
 # settings
-my $flatbuffers_compiler = '~/Downloads/flatbuffers/flatc';
+my $flatbuffers_compiler = 'flatc';
 
 my %loaded_files; # prevent double loading files
 
@@ -28,15 +29,15 @@ sub compare_arrays {
 	my ($array1, $array2) = @_;
 	for my $i (0 .. $#$array1, 0 .. $#$array2) {
 		if (not defined $array2->[$i]) {
-			die "incorrect decoding for index #$i: undef <=> $array1->[$i]" if defined $array1->[$i];
+			confess "incorrect decoding for index #$i: undef <=> $array1->[$i]" if defined $array1->[$i];
 		} elsif (ref $array1->[$i] eq 'HASH') {
-			die "lack of hash at index $i" if not defined $array2->[$i];
+			confess "lack of hash at index $i" if not defined $array2->[$i];
 			compare_hashes($array1->[$i], $array2->[$i]);
 		} elsif (ref $array1->[$i] eq 'ARRAY') {
-			die "lack of array at index $i" if not defined $array2->[$i];
+			confess "lack of array at index $i" if not defined $array2->[$i];
 			compare_arrays($array1->[$i], $array2->[$i]);
 		} else {
-			die "incorrect decoding for index #$i: $array2->[$i] <=> $array1->[$i]" if $array2->[$i] ne $array1->[$i];
+			confess "incorrect decoding for index #$i: $array2->[$i] <=> $array1->[$i]" if $array2->[$i] ne $array1->[$i];
 		}
 	}
 }
@@ -46,15 +47,15 @@ sub compare_hashes {
 	my ($hash1, $hash2) = @_;
 	for my $field (keys %$hash1, keys %$hash2) {
 		if (not defined $hash2->{$field}) {
-			die "incorrect decoding for field '$field': undef <=> $hash1->{$field}" if defined $hash1->{$field};
+			confess "incorrect decoding for field '$field': undef <=> $hash1->{$field}" if defined $hash1->{$field};
 		} elsif (ref $hash1->{$field} eq 'HASH') {
-			die "lack of hash at index '$field'" if not defined $hash2->{$field};
+			confess "lack of hash at index '$field'" if not defined $hash2->{$field};
 			compare_hashes($hash1->{$field}, $hash2->{$field});
 		} elsif (ref $hash1->{$field} eq 'ARRAY') {
-			die "lack of array at index '$field'" if not defined $hash2->{$field};
+			confess "lack of array at index '$field'" if not defined $hash2->{$field};
 			compare_arrays($hash1->{$field}, $hash2->{$field});
 		} else {
-			die "incorrect decoding for field '$field': $hash2->{$field} <=> $hash1->{$field}" if $hash2->{$field} ne $hash1->{$field};
+			confess "incorrect decoding for field '$field': $hash2->{$field} <=> $hash1->{$field}" if $hash2->{$field} ne $hash1->{$field};
 		}
 	}
 }
