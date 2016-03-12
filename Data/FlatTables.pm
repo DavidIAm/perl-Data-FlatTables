@@ -15,10 +15,11 @@ use Data::Dumper;
 	# anonymous package creation
 	# source filter for transparent creation
 	# superclass creation instead of self-contained class to prevent code pollution
-	# verify that the method names that we are creating arent reserved
 	# enum support
 	# strict flatbuffers-compatible mode
 	# default values for strings
+	# re-linking objects that have the same data or are the same, during compile time
+	# caching compiled objects during compilation
 
 
 
@@ -33,10 +34,10 @@ use Data::Dumper;
 # returns the package name of the root object declared in the fbs file (undef if no root object was declared)
 sub load {
 	my ($self, $filepath) = @_;
-	my $parser = Data::FlatTables->new;
-	my $compiled = $parser->compile_file($filepath);
+	$self = $self->new unless ref $self;
+	my $compiled = $self->compile_file($filepath);
 
-	$parser->load_perl_packages($compiled->{compiled_types});
+	$self->load_perl_packages($compiled->{compiled_types});
 
 	return $compiled->{root_type}
 }
@@ -47,10 +48,10 @@ sub load {
 # returns the package name of the root object declared in the fbs file (undef if no root object was declared)
 sub create_packages {
 	my ($self, $filepath) = @_;
-	my $parser = Data::FlatTables->new;
-	my $compiled = $parser->compile_file($filepath);
+	$self = $self->new unless ref $self;
+	my $compiled = $self->compile_file($filepath);
 
-	$parser->create_perl_packages($compiled->{compiled_types});
+	$self->create_perl_packages($compiled->{compiled_types});
 	return $compiled->{root_type}
 }
 
@@ -148,12 +149,14 @@ sub new {
 	my ($class, %args) = @_;
 	my $self = bless {}, $class;
 
+	$self->standalone_packages($args{standalone_packages} // 1);
 	$self->toplevel_namespace($args{toplevel_namespace});
 	$self->table_types({});
 
 	return $self
 }
 
+sub standalone_packages { @_ > 1 ? $_[0]{standalone_packages} = $_[1] : $_[0]{standalone_packages} }
 sub toplevel_namespace { @_ > 1 ? $_[0]{toplevel_namespace} = $_[1] : $_[0]{toplevel_namespace} }
 
 sub current_namespace { @_ > 1 ? $_[0]{current_namespace} = $_[1] : $_[0]{current_namespace} }
@@ -221,32 +224,24 @@ sub parse {
 
 		if (defined $file_extension_name) {
 			$file_extension_name = strip_string $file_extension_name;
-			# say "got file extension: $file_extension_name";
 			push @statements, { type => 'file_extension_decl', name => $file_extension_name };
 		} elsif (defined $file_identifier_name) {
 			$file_identifier_name = strip_string $file_identifier_name;
-			# say "got file identifier: $file_identifier_name";
 			push @statements, { type => 'file_identifier_decl', name => $file_identifier_name };
 		} elsif (defined $include_name) {
 			$include_name = strip_string $include_name;
-			# say "got include: $include_name";
 			push @statements, { type => 'include', filepath => $include_name };
 		} elsif (defined $namespace_name) {
-			# say "got namespace: $namespace_name";
 			push @statements, { type => 'namespace_decl', name => $namespace_name };
 		} elsif (defined $root_name) {
-			# say "got root: $root_name";
 			push @statements, { type => 'root_decl', name => $root_name };
 		} elsif (defined $attribute_name) {
 			$attribute_name = strip_string $attribute_name;
-			# say "got attribute: $attribute_name";
 			push @statements, { type => 'attribute_decl', name => $attribute_name };
 		} elsif (defined $enum_declaration) {
-			# say "got enum_declaration: $enum_declaration";
-			# push @statements, { type => 'attribute_decl', name => $attribute_name };
+			# push @statements, { type => 'enum_decl', name => $attribute_name };
 			...
 		} elsif (defined $type_declaration) {
-			# say "got type_declaration: $type_declaration";
 			my $type = $self->parse_type_decl($type_declaration);
 			push @statements, { type => 'type_decl', struct => $type };
 		} else {
@@ -540,6 +535,11 @@ sub compile_table_type {
 use strict;
 use warnings;
 ";
+	# inject parenthood if we aren't writing standalone packages
+	$code .= "
+use parent 'Data::FlatTables::Table';
+" unless $self->standalone_packages;
+
 	# new method preamble
 	$code .= '
 sub new {
@@ -589,10 +589,27 @@ sub new {
 }
 ';
 
-	# type definition
+	# type accessor
 	$code .= "
 sub flatbuffers_type { '$data->{type}' }
 ";
+
+	# types for serialization
+	$code .= "
+my %basic_types = (
+	bool => { format => 'C', length => 1 },
+	byte => { format => 'c', length => 1 },
+	ubyte => { format => 'C', length => 1 },
+	short => { format => 's<', length => 2 },
+	ushort => { format => 'S<', length => 2 },
+	int => { format => 'l<', length => 4 },
+	uint => { format => 'L<', length => 4 },
+	float => { format => 'f<', length => 4 },
+	long => { format => 'q<', length => 8 },
+	ulong => { format => 'Q<', length => 8 },
+	double => { format => 'd<', length => 8 },
+);
+" if $self->standalone_packages;
 
 	# field getter/setter functions
 	for my $field (@{$data->{fields}}) {
@@ -712,22 +729,6 @@ sub deserialize_string {
 	return substr $data, $string_offset + 4, $string_length # return a substring
 }
 
-
-
-my %basic_types = (
-	bool => { format => "C", length => 1 },
-	byte => { format => "c", length => 1 },
-	ubyte => { format => "C", length => 1 },
-	short => { format => "s<", length => 2 },
-	ushort => { format => "S<", length => 2 },
-	int => { format => "l<", length => 4 },
-	uint => { format => "L<", length => 4 },
-	float => { format => "f<", length => 4 },
-	long => { format => "q<", length => 8 },
-	ulong => { format => "Q<", length => 8 },
-	double => { format => "d<", length => 8 },
-);
-
 sub deserialize_array {
 	my ($self, $array_type, $data, $offset) = @_;
 
@@ -772,7 +773,7 @@ sub deserialize_array {
 	return \@array
 }
 
-';
+' if $self->standalone_packages;
 
 
 	# serialize function
@@ -903,13 +904,9 @@ sub serialize_data {
 	my $vtable = $self->serialize_vtable;
 	my $data = "\0\0\0\0";
 
-	# my $data_object = { type => "table" };
-
 	my @reloc = ({ offset => 0, item => $vtable, type => "signed negative delta" });
 	# flatbuffers vtable offset is stored in negative form
 	my @objects = ($vtable);
-
-	# $offset += 4;
 
 ';
 
@@ -966,8 +963,6 @@ sub serialize_data {
 	# pad to 4 byte boundary
 	$data .= pack "x" x (4 - (length ($data) % 4)) if length ($data) % 4;
 
-	# $data_object->{data} = $data;
-	# $data_object->{reloc} = \@reloc;
 	# return table data and other objects that we\'ve created
 	return { type => "table", data => $data, reloc => \@reloc }, @objects
 }
@@ -1039,7 +1034,7 @@ sub serialize_array {
 	return { type => "array", data => $data, reloc => \@reloc }, @array_objects
 }
 
-';
+' if $self->standalone_packages;
 
 	# package footer
 	$code .= "
@@ -1067,6 +1062,12 @@ sub compile_struct_type {
 use strict;
 use warnings;
 ";
+
+	# inject parenthood if we aren't writing standalone packages
+	$code .= "
+use parent 'Data::FlatTables::Table';
+" unless $self->standalone_packages;
+
 	# new method preamble
 	$code .= '
 sub new {
@@ -1117,6 +1118,23 @@ sub new {
 	$code .= "
 sub flatbuffers_type { '$data->{type}' }
 ";
+	
+	# flatbuffers types description
+	$code .= "
+my %basic_types = (
+	bool => { format => 'C', length => 1 },
+	byte => { format => 'c', length => 1 },
+	ubyte => { format => 'C', length => 1 },
+	short => { format => 's<', length => 2 },
+	ushort => { format => 'S<', length => 2 },
+	int => { format => 'l<', length => 4 },
+	uint => { format => 'L<', length => 4 },
+	float => { format => 'f<', length => 4 },
+	long => { format => 'q<', length => 8 },
+	ulong => { format => 'Q<', length => 8 },
+	double => { format => 'd<', length => 8 },
+);
+" if $self->standalone_packages;
 
 	# field getter/setter functions
 	for my $field (@{$data->{fields}}) {
@@ -1211,22 +1229,6 @@ sub deserialize_string {
 	return substr $data, $string_offset + 4, $string_length # return a substring
 }
 
-
-
-my %basic_types = (
-	bool => { format => "C", length => 1 },
-	byte => { format => "c", length => 1 },
-	ubyte => { format => "C", length => 1 },
-	short => { format => "s<", length => 2 },
-	ushort => { format => "S<", length => 2 },
-	int => { format => "l<", length => 4 },
-	uint => { format => "L<", length => 4 },
-	float => { format => "f<", length => 4 },
-	long => { format => "q<", length => 8 },
-	ulong => { format => "Q<", length => 8 },
-	double => { format => "d<", length => 8 },
-);
-
 sub deserialize_array {
 	my ($self, $array_type, $data, $offset) = @_;
 
@@ -1271,7 +1273,7 @@ sub deserialize_array {
 	return \@array
 }
 
-';
+' if $self->standalone_packages;
 
 
 	# serialize_data header
@@ -1427,7 +1429,7 @@ sub serialize_array {
 
 	return { type => "array", data => $data, reloc => \@reloc }, @array_objects
 }
-';
+' if $self->standalone_packages;
 
 
 	# package footer
@@ -1451,7 +1453,6 @@ sub load_perl_packages {
 	my ($self, $compiled) = @_;
 
 	for my $file (@$compiled) {
-		# say "compiled file: $file->{code}";
 		eval $file->{code};
 		if ($@) {
 			die "compiled table died [$file->{package_name}]: $@";
@@ -1474,9 +1475,21 @@ sub create_perl_packages {
 	}
 }
 
+
+
 sub main {
-	for my $filepath (@_) {
-		Data::FlatTables->create_packages($filepath);
+	my $compiler = Data::FlatTables->new;
+	while (@_) {
+		my $arg = shift @_;
+		if ($arg =~ /\A-/) {
+			if ($arg eq '-p') {
+				$compiler->standalone_packages(0);
+			} else {
+				die "unknown option : '$arg'";
+			}
+		} else {
+			$compiler->create_packages($arg);
+		}
 	}
 }
 
