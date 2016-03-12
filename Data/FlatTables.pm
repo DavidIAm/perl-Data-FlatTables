@@ -1090,7 +1090,7 @@ sub new {
 	for my $field (@{$data->{fields}}) {
 		my $type = $field->{type};
 		if ($self->is_basic_type($type) or $self->is_string_type($type)) {
-			$code .= "\t\$self->$field->{name}(\$args{$field->{name}});\n";
+			$code .= "\t\$self->{$field->{name}} = \$args{$field->{name}};\n";
 		} elsif ($self->is_array_type($type)) {
 			if ($self->is_object_array_type($type)) {
 				my $type = $self->translate_object_type($type);
@@ -1101,21 +1101,21 @@ sub new {
 				my $true_type = $type;
 				$true_type = $self->strip_array_brackets($true_type) for 1 .. $nest_levels;
 
-				$code .= "\t\$self->$field->{name}(\n";
+				$code .= "\t\$self->{$field->{name}} = \n";
 				$code .= "\t\t". "[ map { " x $nest_levels;
 
 				$code .= "\n\t\t\t$true_type->new(\%\$_)\n";
 
 				$code .= "\t\t". " } \@\$_ ] " x ($nest_levels - 1);
-				$code .= "} \@{\$args{$field->{name}}} ]\n\t);\n";
+				$code .= "} \@{\$args{$field->{name}}} ];\n";
 
 			} else {
-				$code .= "\t\$self->$field->{name}(\$args{$field->{name}});\n";
+				$code .= "\t\$self->{$field->{name}} = \$args{$field->{name}};\n";
 			}
 		} else {
 			my $table_type = $self->get_object_type($type);
 			my $typename = $table_type->{typename};
-			$code .= "\t\$self->$field->{name}($typename->new(%{\$args{$field->{name}}}));\n";
+			$code .= "\t\$self->{$field->{name}} = $typename->new(%{\$args{$field->{name}}});\n";
 		}
 	}
 
