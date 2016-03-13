@@ -65,7 +65,7 @@ sub test_perl_to_perl {
 	$opts //= [];
 
 	my $compiler = Data::FlatTables->new(@$opts);
-	$loaded_files{$file} = $compiler->load($file) unless exists $loaded_files{$file};
+	$loaded_files{$file} = $compiler->load_file($file) unless exists $loaded_files{$file};
 	my $class = $loaded_files{$file};
 
 	# serialize the data
@@ -88,7 +88,7 @@ sub test_perl_to_flatbuffers {
 	$opts //= [];
 
 	my $compiler = Data::FlatTables->new(@$opts);
-	$loaded_files{$file} = $compiler->load($file) unless exists $loaded_files{$file};
+	$loaded_files{$file} = $compiler->load_file($file) unless exists $loaded_files{$file};
 	my $class = $loaded_files{$file};
 
 	# serialize and write to file
@@ -112,7 +112,7 @@ sub test_flatbuffers_to_perl {
 	$opts //= [];
 
 	my $compiler = Data::FlatTables->new(@$opts);
-	$loaded_files{$file} = $compiler->load($file) unless exists $loaded_files{$file};
+	$loaded_files{$file} = $compiler->load_file($file) unless exists $loaded_files{$file};
 	my $class = $loaded_files{$file};
 
 	# write a neat json file

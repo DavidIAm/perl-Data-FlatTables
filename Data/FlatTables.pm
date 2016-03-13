@@ -30,15 +30,25 @@ use Data::Dumper;
 
 
 
+# compiles and loads packages from a given fbs string
+# returns the package name of the root object declared in the fbs string (undef if no root object was declared)
+sub load_text {
+	my ($self, $text) = @_;
+	$self = $self->new unless ref $self;
+	my $compiled = $self->compile_text($text);
+
+	$self->load_perl_packages($compiled->{compiled_types});
+	return $compiled->{root_type}
+}
+
 # compiles and loads packages from a given fbs file
 # returns the package name of the root object declared in the fbs file (undef if no root object was declared)
-sub load {
+sub load_file {
 	my ($self, $filepath) = @_;
 	$self = $self->new unless ref $self;
 	my $compiled = $self->compile_file($filepath);
 
 	$self->load_perl_packages($compiled->{compiled_types});
-
 	return $compiled->{root_type}
 }
 
@@ -167,8 +177,14 @@ sub compile_file {
 	my ($self, $filepath) = @_;
 
 	my $compiler_state = { filepath => $filepath };
-
 	my $text = read_file($filepath);
+
+	return $self->compile_text($text, $compiler_state)
+}
+
+sub compile_text {
+	my ($self, $text, $compiler_state) = @_;
+	$compiler_state //= {};
 
 	my $syntax = $self->parse($compiler_state, $text);
 	$self->compile($compiler_state, $syntax);
@@ -709,7 +725,7 @@ sub deserialize {
 
 	# end of deserialize function
 	$code .= '
-	
+
 	return $self
 }
 ';
