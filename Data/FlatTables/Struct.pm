@@ -76,7 +76,7 @@ sub serialize_string {
 	my ($self, $string) = @_;
 
 	my $len = pack "L<", length $string;
-	$string .= "\0"; # null termination byte because why the fuck not (it\'s part of flatbuffers)
+	$string .= "\0"; # null termination byte because why the fuck not (it's part of flatbuffers)
 
 	my $data = "$len$string";
 	$data .= pack "x" x (4 - (length ($data) % 4)) if length ($data) % 4; # pad to 4 byte boundary

@@ -798,39 +798,7 @@ sub serialize {
 	# header pointer to root data structure
 	unshift @parts, { type => "header", data => "\0\0\0\0", reloc => [{ offset => 0, item => $root, type => "unsigned delta" }] };
 
-
-	my $data = "";
-	my $offset = 0;
-
-	# concatentate the data
-	for my $part (@parts) {
-		$part->{serialized_offset} = $offset;
-		$data .= $part->{data};
-		$offset += length $part->{data};
-	}
-
-	# second pass for writing offsets to other parts
-	for my $part (@parts) {
-		if (defined $part->{reloc}) {
-			# perform address relocation
-			for my $reloc (@{$part->{reloc}}) {
-				my $value;
-				if (defined $reloc->{lambda}) { # allow the reloc to have a custom format
-					$value = $reloc->{lambda}($part, $reloc);
-				} elsif (defined $reloc->{type} and $reloc->{type} eq "unsigned delta") {
-					$value = pack "L<", $reloc->{item}{serialized_offset} - $part->{serialized_offset} - $reloc->{offset};
-				} elsif (defined $reloc->{type} and $reloc->{type} eq "signed negative delta") {
-					$value = pack "l<", $part->{serialized_offset} + $reloc->{offset} - $reloc->{item}{serialized_offset};
-				} else {
-					...
-				}
-				substr $data, $part->{serialized_offset} + $reloc->{offset}, length($value), $value;
-			}
-		}
-	}
-
-	# done, the data is now ready to be deserialized
-	return $data
+	return $self->serialize_objects(@parts);
 }
 ';
 
@@ -982,6 +950,44 @@ sub serialize_data {
 
 
 	$code .= '
+
+sub serialize_objects {
+	my ($self, @objects) = @_;
+
+
+	my $data = "";
+	my $offset = 0;
+
+	# concatentate the data
+	for my $object (@objects) {
+		$object->{serialized_offset} = $offset;
+		$data .= $object->{data};
+		$offset += length $object->{data};
+	}
+
+	# second pass for writing offsets to other parts
+	for my $object (@objects) {
+		if (defined $object->{reloc}) {
+			# perform address relocation
+			for my $reloc (@{$object->{reloc}}) {
+				my $value;
+				if (defined $reloc->{lambda}) { # allow the reloc to have a custom format
+					$value = $reloc->{lambda}($object, $reloc);
+				} elsif (defined $reloc->{type} and $reloc->{type} eq "unsigned delta") {
+					$value = pack "L<", $reloc->{item}{serialized_offset} - $object->{serialized_offset} - $reloc->{offset};
+				} elsif (defined $reloc->{type} and $reloc->{type} eq "signed negative delta") {
+					$value = pack "l<", $object->{serialized_offset} + $reloc->{offset} - $reloc->{item}{serialized_offset};
+				} else {
+					...
+				}
+				substr $data, $object->{serialized_offset} + $reloc->{offset}, length($value), $value;
+			}
+		}
+	}
+
+	# done, the data is now ready to be deserialized
+	return $data
+}
 
 sub serialize_vtable {
 	my ($self, @lengths) = @_;

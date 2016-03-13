@@ -73,6 +73,45 @@ sub deserialize_array {
 }
 
 
+
+sub serialize_objects {
+	my ($self, @objects) = @_;
+
+
+	my $data = "";
+	my $offset = 0;
+
+	# concatentate the data
+	for my $object (@objects) {
+		$object->{serialized_offset} = $offset;
+		$data .= $object->{data};
+		$offset += length $object->{data};
+	}
+
+	# second pass for writing offsets to other parts
+	for my $object (@objects) {
+		if (defined $object->{reloc}) {
+			# perform address relocation
+			for my $reloc (@{$object->{reloc}}) {
+				my $value;
+				if (defined $reloc->{lambda}) { # allow the reloc to have a custom format
+					$value = $reloc->{lambda}($object, $reloc);
+				} elsif (defined $reloc->{type} and $reloc->{type} eq "unsigned delta") {
+					$value = pack "L<", $reloc->{item}{serialized_offset} - $object->{serialized_offset} - $reloc->{offset};
+				} elsif (defined $reloc->{type} and $reloc->{type} eq "signed negative delta") {
+					$value = pack "l<", $object->{serialized_offset} + $reloc->{offset} - $reloc->{item}{serialized_offset};
+				} else {
+					...
+				}
+				substr $data, $object->{serialized_offset} + $reloc->{offset}, length($value), $value;
+			}
+		}
+	}
+
+	# done, the data is now ready to be deserialized
+	return $data
+}
+
 sub serialize_vtable {
 	my ($self, @lengths) = @_;
 
@@ -95,7 +134,7 @@ sub serialize_string {
 	my ($self, $string) = @_;
 
 	my $len = pack "L<", length $string;
-	$string .= "\0"; # null termination byte because why the fuck not (it\'s part of flatbuffers)
+	$string .= "\0"; # null termination byte because why the fuck not (it's part of flatbuffers)
 
 	my $data = "$len$string";
 	$data .= pack "x" x (4 - (length ($data) % 4)) if length ($data) % 4; # pad to 4 byte boundary
