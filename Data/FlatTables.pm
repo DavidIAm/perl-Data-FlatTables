@@ -834,66 +834,66 @@ sub serialize {
 }
 ';
 
-	# serialize_vtable header
-	$code .= '
-sub serialize_vtable {
-	my ($self) = @_;
+# 	# serialize_vtable header
+# 	$code .= '
+# sub serialize_vtable {
+# 	my ($self) = @_;
 
-	my @data;
-	my $offset = 4;
-';
+# 	my @data;
+# 	my $offset = 4;
+# ';
 
-	# field offset serializers
-	for my $field (@{$data->{fields}}) {
-		my $type = $field->{type};
-		if ($self->is_basic_type($type) or $self->is_string_type($type) or $self->is_array_type($type)) {
-			$code .= "
-	if (defined \$self->{$field->{name}}) {
-		push \@data, \$offset;
-		\$offset += $field->{length};
-	} else {
-		push \@data, 0;
-	}
-";
-		} else {
-			my $table_type = $self->get_object_type($type);
-			if ($table_type->{type} eq 'table') {
-			$code .= "
-	if (defined \$self->{$field->{name}}) {
-		push \@data, \$offset;
-		\$offset += $field->{length};
-	} else {
-		push \@data, 0;
-	}
-";
-			} elsif ($table_type->{type} eq 'struct') {
-			$code .= "
-	if (defined \$self->{$field->{name}}) {
-		push \@data, \$offset;
-		\$offset += $table_type->{typename}->flatbuffers_struct_length;
-	} else {
-		push \@data, 0;
-	}
-";
-			} else {
-				...
-			}
-		}
-	}
+# 	# field offset serializers
+# 	for my $field (@{$data->{fields}}) {
+# 		my $type = $field->{type};
+# 		if ($self->is_basic_type($type) or $self->is_string_type($type) or $self->is_array_type($type)) {
+# 			$code .= "
+# 	if (defined \$self->{$field->{name}}) {
+# 		push \@data, \$offset;
+# 		\$offset += $field->{length};
+# 	} else {
+# 		push \@data, 0;
+# 	}
+# ";
+# 		} else {
+# 			my $table_type = $self->get_object_type($type);
+# 			if ($table_type->{type} eq 'table') {
+# 			$code .= "
+# 	if (defined \$self->{$field->{name}}) {
+# 		push \@data, \$offset;
+# 		\$offset += $field->{length};
+# 	} else {
+# 		push \@data, 0;
+# 	}
+# ";
+# 			} elsif ($table_type->{type} eq 'struct') {
+# 			$code .= "
+# 	if (defined \$self->{$field->{name}}) {
+# 		push \@data, \$offset;
+# 		\$offset += $table_type->{typename}->flatbuffers_struct_length;
+# 	} else {
+# 		push \@data, 0;
+# 	}
+# ";
+# 			} else {
+# 				...
+# 			}
+# 		}
+# 	}
 
-	$code .= "
-	push \@data, 0; # pad to 4 byte boundary
-" if @{$data->{fields}} % 2; # add padding code if there is an odd field count
+# 	$code .= "
+# 	push \@data, 0; # pad to 4 byte boundary
+# " if @{$data->{fields}} % 2; # add padding code if there is an odd field count
 
-	# serialize_vtable footer
-	$code .= "
+# 	# serialize_vtable footer
+# 	$code .= "
 
-	unshift \@data, \$offset;
-	unshift \@data, 2 * $vtable_item_count;
+# 	unshift \@data, \$offset;
+# 	unshift \@data, 2 * $vtable_item_count;
 
-	return { type => 'vtable', data => pack 'S<' x \@data, \@data }
-}
-";
+# 	return { type => 'vtable', data => pack 'S<' x \@data, \@data }
+# }
+# ";
 
 
 	# serialize_data header
@@ -901,7 +901,19 @@ sub serialize_vtable {
 sub serialize_data {
 	my ($self) = @_;
 
-	my $vtable = $self->serialize_vtable;
+	my $vtable = $self->serialize_vtable(
+';
+	
+	for my $field (@{$data->{fields}}) {
+		if ($self->is_object_type($field->{type}) and $self->get_object_type($field->{type})->{type} eq 'struct') {
+			my $table_type = $self->get_object_type($field->{type});
+			$code .= "\t\tdefined \$self->{$field->{name}} ? $table_type->{typename}->flatbuffers_struct_length : 0,\n";
+		} else {
+			$code .= "\t\tdefined \$self->{$field->{name}} ? $field->{length} : 0,\n";
+		}
+	}
+
+	$code .= '	);
 	my $data = "\0\0\0\0";
 
 	my @reloc = ({ offset => 0, item => $vtable, type => "signed negative delta" });
@@ -970,6 +982,25 @@ sub serialize_data {
 
 
 	$code .= '
+
+sub serialize_vtable {
+	my ($self, @lengths) = @_;
+
+	my $offset = 4;
+	my @table;
+
+	for (@lengths) { # parse table offsets
+		push @table, $_ ? $offset : 0;
+		$offset += $_;
+	}
+
+	unshift @table, $offset; # prefix data length
+	unshift @table, 2 * (@table + 1); #prefix vtable length
+	push @table, 0 if @table % 2; # pad if odd count
+	# compile object
+	return { type => "vtable", data => pack "S<" x @table, @table }
+}
+
 sub serialize_string {
 	my ($self, $string) = @_;
 

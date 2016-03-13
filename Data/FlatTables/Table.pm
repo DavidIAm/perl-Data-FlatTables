@@ -73,6 +73,24 @@ sub deserialize_array {
 }
 
 
+sub serialize_vtable {
+	my ($self, @lengths) = @_;
+
+	my $offset = 4;
+	my @table;
+
+	for (@lengths) { # parse table offsets
+		push @table, $_ ? $offset : 0;
+		$offset += $_;
+	}
+
+	unshift @table, $offset; # prefix data length
+	unshift @table, 2 * (@table + 1); #prefix vtable length
+	push @table, 0 if @table % 2; # pad if odd count
+	# compile object
+	return { type => "vtable", data => pack "S<" x @table, @table }
+}
+
 sub serialize_string {
 	my ($self, $string) = @_;
 
