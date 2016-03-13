@@ -12,9 +12,6 @@ use Data::Dumper;
 
 
 # TODO:
-	# anonymous package creation
-	# source filter for transparent creation
-	# superclass creation instead of self-contained class to prevent code pollution
 	# enum support
 	# strict flatbuffers-compatible mode
 	# default values for strings
@@ -814,31 +811,29 @@ sub serialize {
 
 		return $self->serialize_objects(@objects);
 	} else {
-
 ';
 
 	# serialize_data header
 	$code .= '
-
-	my $vtable = $self->serialize_vtable(
+		my $vtable = $self->serialize_vtable(
 ';
 	
 	for my $field (@{$data->{fields}}) {
 		if ($self->is_object_type($field->{type}) and $self->get_object_type($field->{type})->{type} eq 'struct') {
 			my $table_type = $self->get_object_type($field->{type});
-			$code .= "\t\tdefined \$self->{$field->{name}} ? $table_type->{typename}->flatbuffers_struct_length : 0,\n";
+			$code .= "\t\t\tdefined \$self->{$field->{name}} ? $table_type->{typename}->flatbuffers_struct_length : 0,\n";
 		} else {
-			$code .= "\t\tdefined \$self->{$field->{name}} ? $field->{length} : 0,\n";
+			$code .= "\t\t\tdefined \$self->{$field->{name}} ? $field->{length} : 0,\n";
 		}
 	}
 
-	$code .= '	);
-	my $data = "\0\0\0\0";
+	$code .=
+'		);
+		my $data = "\0\0\0\0";
 
-	my @reloc = ({ offset => 0, item => $vtable, type => "signed negative delta" });
-	# flatbuffers vtable offset is stored in negative form
-	my @objects = ($vtable);
-
+		my @reloc = ({ offset => 0, item => $vtable, type => "signed negative delta" });
+		# flatbuffers vtable offset is stored in negative form
+		my @objects = ($vtable);
 ';
 
 
@@ -847,56 +842,55 @@ sub serialize {
 	# field data serializers
 	for my $field (@{$data->{fields}}) {
 		$code .= "
-	if (defined \$self->{$field->{name}}) {
-		";
+		if (defined \$self->{$field->{name}}) {
+			";
 		my $type = $field->{type};
 		if ($self->is_basic_type($type)) {
 			$code .= "\$data .= pack '$flatbuffers_basic_types{$type}{format}', \$self->{$field->{name}};";
 
 		} elsif ($self->is_string_type($type)) {
 			$code .= qq/my \$string_object = \$self->serialize_string(\$self->{$field->{name}});
-		push \@objects, \$string_object;
-		push \@reloc, { offset => length (\$data), item => \$string_object, type => 'unsigned delta'};
-		\$data .= \"\\0\\0\\0\\0\";/;
+			push \@objects, \$string_object;
+			push \@reloc, { offset => length (\$data), item => \$string_object, type => 'unsigned delta'};
+			\$data .= \"\\0\\0\\0\\0\";/;
 
 		} elsif ($self->is_array_type($type)) {
 			my $type = $type;
 			$type = $self->translate_object_type($type) if $self->is_object_array_type($type);
 			$code .= qq/my (\$array_object, \@array_objects) = \$self->serialize_array('$type', \$self->{$field->{name}}, \$cache);
-		push \@objects, \$array_object, \@array_objects;
-		push \@reloc, { offset => length (\$data), item => \$array_object, type => 'unsigned delta'};
-		\$data .= \"\\0\\0\\0\\0\";/;
+			push \@objects, \$array_object, \@array_objects;
+			push \@reloc, { offset => length (\$data), item => \$array_object, type => 'unsigned delta'};
+			\$data .= \"\\0\\0\\0\\0\";/;
 
 		} else { # table serialization
 			my $table_type = $self->get_object_type($type);
 			
 			if ($table_type->{type} eq 'table') {
 				$code .= qq/my (\$root_object, \@table_objects) = \$self->{$field->{name}}->serialize(\$cache);
-		push \@objects, \$root_object, \@table_objects;
-		push \@reloc, { offset => length (\$data), item => \$root_object, type => 'unsigned delta' };
-		\$data .= \"\\0\\0\\0\\0\";/;
+			push \@objects, \$root_object, \@table_objects;
+			push \@reloc, { offset => length (\$data), item => \$root_object, type => 'unsigned delta' };
+			\$data .= \"\\0\\0\\0\\0\";/;
 			} elsif ($table_type->{type} eq 'struct') {
 				$code .= qq/my (\$root_object, \@struct_objects) = \$self->{$field->{name}}->serialize(\$cache);
-		push \@objects, \@struct_objects;
-		push \@reloc, map { \$_->{offset} += length (\$data); \$_ } \@{\$root_object->{reloc}};
-		\$data .= \$root_object->{data};/;
+			push \@objects, \@struct_objects;
+			push \@reloc, map { \$_->{offset} += length (\$data); \$_ } \@{\$root_object->{reloc}};
+			\$data .= \$root_object->{data};/;
 			} else {
 				...
 			}
 		}
 		$code .= "
-	}
+		}
 ";
 	}
 
 	# end of serialize_data
 	$code .= '
-	# pad to 4 byte boundary
-	$data .= pack "x" x (4 - (length ($data) % 4)) if length ($data) % 4;
+		# pad to 4 byte boundary
+		$data .= pack "x" x (4 - (length ($data) % 4)) if length ($data) % 4;
 
-	# return table data and other objects that we\'ve created
-	return { type => "table", data => $data, reloc => \@reloc }, @objects
-
+		# return table data and other objects that we\'ve created
+		return { type => "table", data => $data, reloc => \@reloc }, @objects
 	}
 }
 	';
