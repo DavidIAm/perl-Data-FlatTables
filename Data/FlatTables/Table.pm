@@ -74,6 +74,7 @@ sub deserialize_array {
 
 
 
+
 sub serialize_objects {
 	my ($self, @objects) = @_;
 
@@ -134,7 +135,7 @@ sub serialize_string {
 	my ($self, $string) = @_;
 
 	my $len = pack "L<", length $string;
-	$string .= "\0"; # null termination byte because why the fuck not (it's part of flatbuffers)
+	$string .= "\0"; # null termination byte because why the fuck not (it\'s part of flatbuffers)
 
 	my $data = "$len$string";
 	$data .= pack "x" x (4 - (length ($data) % 4)) if length ($data) % 4; # pad to 4 byte boundary
@@ -144,7 +145,7 @@ sub serialize_string {
 
 
 sub serialize_array {
-	my ($self, $array_type, $array) = @_;
+	my ($self, $array_type, $array, $cache) = @_;
 
 	$array_type = $array_type =~ s/\A\[(.*)\]\Z/$1/sr;
 
@@ -165,7 +166,7 @@ sub serialize_array {
 	} elsif ($array_type =~ /\A\[/) { # array of arrays
 		$data .= "\0\0\0\0" x @$array;
 		for my $i (0 .. $#$array) {
-			my ($array_object, @child_array_objects) = $self->serialize_array($array_type, $array->[$i]);
+			my ($array_object, @child_array_objects) = $self->serialize_array($array_type, $array->[$i], $cache);
 			push @array_objects, $array_object, @child_array_objects;
 			push @reloc, { offset => 4 + $i * 4, item => $array_object, type => "unsigned delta" };
 		}
@@ -174,13 +175,13 @@ sub serialize_array {
 		if ($array_type->flatbuffers_type eq "table") {
 			$data .= "\0\0\0\0" x @$array;
 			for my $i (0 .. $#$array) {
-				my ($root_object, @table_objects) = $array->[$i]->serialize_data;
+				my ($root_object, @table_objects) = $array->[$i]->serialize($cache);
 				push @array_objects, $root_object, @table_objects;
 				push @reloc, { offset => 4 + $i * 4, item => $root_object, type => "unsigned delta" };
 			}
 		} elsif ($array_type->flatbuffers_type eq "struct") {
 			for my $i (0 .. $#$array) {
-				my ($root_object, @struct_objects) = $array->[$i]->serialize_data;
+				my ($root_object, @struct_objects) = $array->[$i]->serialize($cache);
 				push @array_objects, @struct_objects;
 				push @reloc, map { $_->{offset} += length ($data); $_ } @{$root_object->{reloc}};
 				$data .= $root_object->{data};

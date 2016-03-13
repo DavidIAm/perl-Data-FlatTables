@@ -680,40 +680,36 @@ sub deserialize {
 	$code .= '
 	my $object_offset = $offset + unpack "L<", substr $data, $offset, 4;
 	my $vtable_offset = $object_offset - unpack "l<", substr $data, $object_offset, 4;
+	my @offsets = map unpack ("S<", $_), map substr ($data, $vtable_offset + $_ * 2, 2), 2 .. '. (2 + $#{$data->{fields}}) .';
 ';
 
 	# field data deserializers
-	my $vtable_iterator = 4;
-	for my $field (@{$data->{fields}}) {
+	for my $i (0 .. $#{$data->{fields}}) {
 		$code .= "
-	\$offset = unpack 'S<', substr \$data, \$vtable_offset + $vtable_iterator, 2;
-	if (\$offset != 0) {
-		";
+	";
+		my $field = $data->{fields}[$i];
 		my $type = $field->{type};
 		if ($self->is_basic_type($type)) {
 			my $type = $flatbuffers_basic_types{$type};
-			$code .= "\$self->{$field->{name}} = unpack '$type->{format}', substr \$data, \$object_offset + \$offset, $type->{length};";
+			$code .= "\$self->{$field->{name}} = unpack '$type->{format}', substr \$data, \$object_offset + \$offsets[$i], $type->{length} if \$offsets[$i] != 0;";
 
 		} elsif ($self->is_string_type($type)) {
-			$code .= "\$self->{$field->{name}} = \$self->deserialize_string(\$data, \$object_offset + \$offset);";
+			$code .= "\$self->{$field->{name}} = \$self->deserialize_string(\$data, \$object_offset + \$offsets[$i]) if \$offsets[$i] != 0;";
 
 		} elsif ($self->is_array_type($type)) {
 			$type = $self->translate_object_type($type) if $self->is_object_array_type($type);
-			$code .= "\$self->{$field->{name}} = \$self->deserialize_array('$type', \$data, \$object_offset + \$offset);";
+			$code .= "\$self->{$field->{name}} = \$self->deserialize_array('$type', \$data, \$object_offset + \$offsets[$i]) if \$offsets[$i] != 0;";
 
 		} else {
 			my $table_type = $self->get_object_type($type);
 			my $typename = $table_type->{typename};
-			$code .= "\$self->{$field->{name}} = $typename->deserialize(\$data, \$object_offset + \$offset);";
+			$code .= "\$self->{$field->{name}} = $typename->deserialize(\$data, \$object_offset + \$offsets[$i]) if \$offsets[$i] != 0;";
 		}
-		$code .= "
-	}
-";
-		$vtable_iterator += 2;
 	}
 
 	# end of deserialize function
 	$code .= '
+	
 	return $self
 }
 ';
@@ -779,95 +775,34 @@ sub deserialize_array {
 	# serialize function
 	$code .= '
 sub serialize {
-	my ($self) = @_;
+	my ($self, $cache) = @_;
+	if (not defined $cache) {
+		$cache = {};
 
-	my @parts = $self->serialize_data;
-	my $root = $parts[0]; # get the root data structure
+		my @objects = $self->serialize($cache);
+		my $root = $objects[0]; # get the root data structure
 ';
 
 	if (defined $compiler_state->{root_type} and $data->{typename} eq $compiler_state->{root_type}) {
 		if (defined $compiler_state->{file_identifier}) {
 			$code .= "
-	# insert file identifier
-	unshift \@parts, { type => 'file_identifier', data => '$compiler_state->{file_identifier}' };
+		# insert file identifier
+		unshift \@objects, { type => 'file_identifier', data => '$compiler_state->{file_identifier}' };
 ";
 		}
 	}
 
 	$code .= '
-	# header pointer to root data structure
-	unshift @parts, { type => "header", data => "\0\0\0\0", reloc => [{ offset => 0, item => $root, type => "unsigned delta" }] };
+		# header pointer to root data structure
+		unshift @objects, { type => "header", data => "\0\0\0\0", reloc => [{ offset => 0, item => $root, type => "unsigned delta" }] };
 
-	return $self->serialize_objects(@parts);
-}
+		return $self->serialize_objects(@objects);
+	} else {
+
 ';
-
-# 	# serialize_vtable header
-# 	$code .= '
-# sub serialize_vtable {
-# 	my ($self) = @_;
-
-# 	my @data;
-# 	my $offset = 4;
-# ';
-
-# 	# field offset serializers
-# 	for my $field (@{$data->{fields}}) {
-# 		my $type = $field->{type};
-# 		if ($self->is_basic_type($type) or $self->is_string_type($type) or $self->is_array_type($type)) {
-# 			$code .= "
-# 	if (defined \$self->{$field->{name}}) {
-# 		push \@data, \$offset;
-# 		\$offset += $field->{length};
-# 	} else {
-# 		push \@data, 0;
-# 	}
-# ";
-# 		} else {
-# 			my $table_type = $self->get_object_type($type);
-# 			if ($table_type->{type} eq 'table') {
-# 			$code .= "
-# 	if (defined \$self->{$field->{name}}) {
-# 		push \@data, \$offset;
-# 		\$offset += $field->{length};
-# 	} else {
-# 		push \@data, 0;
-# 	}
-# ";
-# 			} elsif ($table_type->{type} eq 'struct') {
-# 			$code .= "
-# 	if (defined \$self->{$field->{name}}) {
-# 		push \@data, \$offset;
-# 		\$offset += $table_type->{typename}->flatbuffers_struct_length;
-# 	} else {
-# 		push \@data, 0;
-# 	}
-# ";
-# 			} else {
-# 				...
-# 			}
-# 		}
-# 	}
-
-# 	$code .= "
-# 	push \@data, 0; # pad to 4 byte boundary
-# " if @{$data->{fields}} % 2; # add padding code if there is an odd field count
-
-# 	# serialize_vtable footer
-# 	$code .= "
-
-# 	unshift \@data, \$offset;
-# 	unshift \@data, 2 * $vtable_item_count;
-
-# 	return { type => 'vtable', data => pack 'S<' x \@data, \@data }
-# }
-# ";
-
 
 	# serialize_data header
 	$code .= '
-sub serialize_data {
-	my ($self) = @_;
 
 	my $vtable = $self->serialize_vtable(
 ';
@@ -911,7 +846,7 @@ sub serialize_data {
 		} elsif ($self->is_array_type($type)) {
 			my $type = $type;
 			$type = $self->translate_object_type($type) if $self->is_object_array_type($type);
-			$code .= qq/my (\$array_object, \@array_objects) = \$self->serialize_array('$type', \$self->{$field->{name}});
+			$code .= qq/my (\$array_object, \@array_objects) = \$self->serialize_array('$type', \$self->{$field->{name}}, \$cache);
 		push \@objects, \$array_object, \@array_objects;
 		push \@reloc, { offset => length (\$data), item => \$array_object, type => 'unsigned delta'};
 		\$data .= \"\\0\\0\\0\\0\";/;
@@ -920,12 +855,12 @@ sub serialize_data {
 			my $table_type = $self->get_object_type($type);
 			
 			if ($table_type->{type} eq 'table') {
-				$code .= qq/my (\$root_object, \@table_objects) = \$self->{$field->{name}}->serialize_data;
+				$code .= qq/my (\$root_object, \@table_objects) = \$self->{$field->{name}}->serialize(\$cache);
 		push \@objects, \$root_object, \@table_objects;
 		push \@reloc, { offset => length (\$data), item => \$root_object, type => 'unsigned delta' };
 		\$data .= \"\\0\\0\\0\\0\";/;
 			} elsif ($table_type->{type} eq 'struct') {
-				$code .= qq/my (\$root_object, \@struct_objects) = \$self->{$field->{name}}->serialize_data;
+				$code .= qq/my (\$root_object, \@struct_objects) = \$self->{$field->{name}}->serialize(\$cache);
 		push \@objects, \@struct_objects;
 		push \@reloc, map { \$_->{offset} += length (\$data); \$_ } \@{\$root_object->{reloc}};
 		\$data .= \$root_object->{data};/;
@@ -945,6 +880,8 @@ sub serialize_data {
 
 	# return table data and other objects that we\'ve created
 	return { type => "table", data => $data, reloc => \@reloc }, @objects
+
+	}
 }
 	';
 
@@ -1021,7 +958,7 @@ sub serialize_string {
 
 
 sub serialize_array {
-	my ($self, $array_type, $array) = @_;
+	my ($self, $array_type, $array, $cache) = @_;
 
 	$array_type = $array_type =~ s/\A\[(.*)\]\Z/$1/sr;
 
@@ -1042,7 +979,7 @@ sub serialize_array {
 	} elsif ($array_type =~ /\A\[/) { # array of arrays
 		$data .= "\0\0\0\0" x @$array;
 		for my $i (0 .. $#$array) {
-			my ($array_object, @child_array_objects) = $self->serialize_array($array_type, $array->[$i]);
+			my ($array_object, @child_array_objects) = $self->serialize_array($array_type, $array->[$i], $cache);
 			push @array_objects, $array_object, @child_array_objects;
 			push @reloc, { offset => 4 + $i * 4, item => $array_object, type => "unsigned delta" };
 		}
@@ -1051,13 +988,13 @@ sub serialize_array {
 		if ($array_type->flatbuffers_type eq "table") {
 			$data .= "\0\0\0\0" x @$array;
 			for my $i (0 .. $#$array) {
-				my ($root_object, @table_objects) = $array->[$i]->serialize_data;
+				my ($root_object, @table_objects) = $array->[$i]->serialize($cache);
 				push @array_objects, $root_object, @table_objects;
 				push @reloc, { offset => 4 + $i * 4, item => $root_object, type => "unsigned delta" };
 			}
 		} elsif ($array_type->flatbuffers_type eq "struct") {
 			for my $i (0 .. $#$array) {
-				my ($root_object, @struct_objects) = $array->[$i]->serialize_data;
+				my ($root_object, @struct_objects) = $array->[$i]->serialize($cache);
 				push @array_objects, @struct_objects;
 				push @reloc, map { $_->{offset} += length ($data); $_ } @{$root_object->{reloc}};
 				$data .= $root_object->{data};
@@ -1315,8 +1252,8 @@ sub deserialize_array {
 
 	# serialize_data header
 	$code .= '
-sub serialize_data {
-	my ($self) = @_;
+sub serialize {
+	my ($self, $cache) = @_;
 
 	my $data = "";
 	my @reloc;
@@ -1347,7 +1284,7 @@ sub serialize_data {
 		} elsif ($self->is_array_type($type)) {
 			$type = $self->translate_object_type($type) if $self->is_object_array_type($type);
 			$code .= qq/do {
-		my (\$array_object, \@array_objects) = \$self->serialize_array('$type', \$self->{$field->{name}});
+		my (\$array_object, \@array_objects) = \$self->serialize_array('$type', \$self->{$field->{name}}, \$cache);
 		push \@objects, \$array_object, \@array_objects;
 		push \@reloc, { offset => length (\$data), item => \$array_object, type => 'unsigned delta'};
 		\$data .= \"\\0\\0\\0\\0\";
@@ -1358,7 +1295,7 @@ sub serialize_data {
 			
 			if ($table_type->{type} eq 'table') {
 				$code .= qq/do {
-		my (\$root_object, \@table_objects) = \$self->{$field->{name}}->serialize_data;
+		my (\$root_object, \@table_objects) = \$self->{$field->{name}}->serialize(\$cache);
 		push \@objects, \$root_object, \@table_objects;
 		push \@reloc, { offset => length (\$data), item => \$root_object, type => 'unsigned delta' };
 		\$data .= \"\\0\\0\\0\\0\";
@@ -1366,7 +1303,7 @@ sub serialize_data {
 
 			} elsif ($table_type->{type} eq 'struct') {
 				$code .= qq/do {
-		my (\$root_object, \@struct_objects) = \$self->{$field->{name}}->serialize_data;
+		my (\$root_object, \@struct_objects) = \$self->{$field->{name}}->serialize(\$cache);
 		push \@objects, \@struct_objects;
 		push \@reloc, map { \$_->{offset} += length (\$data); \$_ } \@{\$root_object->{reloc}};
 		\$data .= \$root_object->{data};
@@ -1417,7 +1354,7 @@ sub serialize_string {
 
 
 sub serialize_array {
-	my ($self, $array_type, $array) = @_;
+	my ($self, $array_type, $array, $cache) = @_;
 
 	$array_type = $array_type =~ s/\A\[(.*)\]\Z/$1/sr;
 
@@ -1438,7 +1375,7 @@ sub serialize_array {
 	} elsif ($array_type =~ /\A\[/) { # array of arrays
 		$data .= "\0\0\0\0" x @$array;
 		for my $i (0 .. $#$array) {
-			my ($array_object, @child_array_objects) = $self->serialize_array($array_type, $array->[$i]);
+			my ($array_object, @child_array_objects) = $self->serialize_array($array_type, $array->[$i], $cache);
 			push @array_objects, $array_object, @child_array_objects;
 			push @reloc, { offset => 4 + $i * 4, item => $array_object, type => "unsigned delta" };
 		}
@@ -1447,13 +1384,13 @@ sub serialize_array {
 		if ($array_type->flatbuffers_type eq "table") {
 			$data .= "\0\0\0\0" x @$array;
 			for my $i (0 .. $#$array) {
-				my ($root_object, @table_objects) = $array->[$i]->serialize_data;
+				my ($root_object, @table_objects) = $array->[$i]->serialize($cache);
 				push @array_objects, $root_object, @table_objects;
 				push @reloc, { offset => 4 + $i * 4, item => $root_object, type => "unsigned delta" };
 			}
 		} elsif ($array_type->flatbuffers_type eq "struct") {
 			for my $i (0 .. $#$array) {
-				my ($root_object, @struct_objects) = $array->[$i]->serialize_data;
+				my ($root_object, @struct_objects) = $array->[$i]->serialize($cache);
 				push @array_objects, @struct_objects;
 				push @reloc, map { $_->{offset} += length ($data); $_ } @{$root_object->{reloc}};
 				$data .= $root_object->{data};
